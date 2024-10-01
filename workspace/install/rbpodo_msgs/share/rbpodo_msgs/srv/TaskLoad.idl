@@ -1,0 +1,26 @@
+// generated from rosidl_adapter/resource/srv.idl.em
+// with input from rbpodo_msgs/srv/TaskLoad.srv
+// generated code does not contain a copyright notice
+
+
+module rbpodo_msgs {
+  module srv {
+    @verbatim (language="comment", text=
+      "Load task")
+    struct TaskLoad_Request {
+      @verbatim (language="comment", text=
+        "Request" "\n"
+        "name of the program to be loaded")
+      string program_name;
+
+      @verbatim (language="comment", text=
+        "timeout (unit: sec)")
+      float timeout;
+    };
+    @verbatim (language="comment", text=
+      "Reply")
+    struct TaskLoad_Response {
+      boolean success;
+    };
+  };
+};

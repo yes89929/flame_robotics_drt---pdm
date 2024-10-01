@@ -1,0 +1,4 @@
+# Set the overall speed control bar.
+
+# desired speed control bar position (0<= speed <= 1)
+float64 speed

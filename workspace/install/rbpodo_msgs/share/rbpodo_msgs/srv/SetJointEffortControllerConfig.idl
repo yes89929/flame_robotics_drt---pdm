@@ -1,0 +1,29 @@
+// generated from rosidl_adapter/resource/srv.idl.em
+// with input from rbpodo_msgs/srv/SetJointEffortControllerConfig.srv
+// generated code does not contain a copyright notice
+
+
+module rbpodo_msgs {
+  module srv {
+    @verbatim (language="comment", text=
+      "Arrival time to the destination (unit: sec. t1 >= 0.002)")
+    struct SetJointEffortControllerConfig_Request {
+      double t1;
+
+      @verbatim (language="comment", text=
+        "Time to maintain the action after arrival (unit: sec. 0.02 < t2 < 0.2)")
+      double t2;
+
+      @verbatim (language="comment", text=
+        "Compensation mode" "\n"
+        "0: target effort = input effort" "\n"
+        "1: target effort = input effort + gravity compensation value" "\n"
+        "2: target effort = input effort + friction compensation value 30%" "\n"
+        "3: target effort = input effort + gravity compensation value + frcition compensation value 30%")
+      uint8 mode;
+    };
+    struct SetJointEffortControllerConfig_Response {
+      boolean success;
+    };
+  };
+};

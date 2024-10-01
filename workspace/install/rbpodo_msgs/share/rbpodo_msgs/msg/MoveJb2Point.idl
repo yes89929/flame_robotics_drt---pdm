@@ -1,0 +1,21 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from rbpodo_msgs/msg/MoveJb2Point.msg
+// generated code does not contain a copyright notice
+
+
+module rbpodo_msgs {
+  module msg {
+    typedef float float__6[6];
+    @verbatim (language="comment", text=
+      "move_jb2_add(...)")
+    struct MoveJb2Point {
+      float__6 joint;
+
+      float speed;
+
+      float acceleration;
+
+      float blending_value;
+    };
+  };
+};

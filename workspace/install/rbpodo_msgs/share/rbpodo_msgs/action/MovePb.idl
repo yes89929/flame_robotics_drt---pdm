@@ -1,0 +1,33 @@
+// generated from rosidl_adapter/resource/action.idl.em
+// with input from rbpodo_msgs/action/MovePb.action
+// generated code does not contain a copyright notice
+
+#include "rbpodo_msgs/msg/MovePbPoint.idl"
+#include "rbpodo_msgs/msg/SystemState.idl"
+
+module rbpodo_msgs {
+  module action {
+    module MovePb_Goal_Constants {
+      const uint8 MOVE_PB_OPTION_INTENDED = 0;
+      const uint8 MOVE_PB_OPTION_CONSTANT = 1;
+      const uint8 MOVE_PB_OPTION_SMOOTH = 2;
+    };
+    struct MovePb_Goal {
+      sequence<rbpodo_msgs::msg::MovePbPoint> points;
+
+      float acceleration;
+
+      uint8 option;
+
+      @verbatim (language="comment", text=
+        "maximum duration (in seconds) to wait for start signal before timing out.")
+      float time_for_waiting_start;
+    };
+    struct MovePb_Result {
+      boolean success;
+    };
+    struct MovePb_Feedback {
+      rbpodo_msgs::msg::SystemState state;
+    };
+  };
+};

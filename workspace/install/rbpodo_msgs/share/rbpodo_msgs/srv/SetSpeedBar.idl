@@ -1,0 +1,19 @@
+// generated from rosidl_adapter/resource/srv.idl.em
+// with input from rbpodo_msgs/srv/SetSpeedBar.srv
+// generated code does not contain a copyright notice
+
+
+module rbpodo_msgs {
+  module srv {
+    @verbatim (language="comment", text=
+      "Set the overall speed control bar.")
+    struct SetSpeedBar_Request {
+      @verbatim (language="comment", text=
+        "desired speed control bar position (0<= speed <= 1)")
+      double speed;
+    };
+    struct SetSpeedBar_Response {
+      boolean success;
+    };
+  };
+};

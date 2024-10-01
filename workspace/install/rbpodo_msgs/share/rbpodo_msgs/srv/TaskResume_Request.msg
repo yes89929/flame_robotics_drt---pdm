@@ -1,0 +1,4 @@
+# Resume task
+
+# Request
+bool collision     # if a collision causes the system to pause, 'collision' must be enabled to resume the task

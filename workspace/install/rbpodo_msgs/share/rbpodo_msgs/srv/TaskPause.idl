@@ -1,0 +1,19 @@
+// generated from rosidl_adapter/resource/srv.idl.em
+// with input from rbpodo_msgs/srv/TaskPause.srv
+// generated code does not contain a copyright notice
+
+
+module rbpodo_msgs {
+  module srv {
+    @verbatim (language="comment", text=
+      "Pause task")
+    struct TaskPause_Request {
+      uint8 structure_needs_at_least_one_member;
+    };
+    @verbatim (language="comment", text=
+      "Reply")
+    struct TaskPause_Response {
+      boolean success;
+    };
+  };
+};

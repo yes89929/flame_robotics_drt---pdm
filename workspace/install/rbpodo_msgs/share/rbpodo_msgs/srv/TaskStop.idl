@@ -1,0 +1,22 @@
+// generated from rosidl_adapter/resource/srv.idl.em
+// with input from rbpodo_msgs/srv/TaskStop.srv
+// generated code does not contain a copyright notice
+
+
+module rbpodo_msgs {
+  module srv {
+    @verbatim (language="comment", text=
+      "Stop task")
+    struct TaskStop_Request {
+      @verbatim (language="comment", text=
+        "Request" "\n"
+        "timeout (unit: sec)")
+      float timeout;
+    };
+    @verbatim (language="comment", text=
+      "Reply")
+    struct TaskStop_Response {
+      boolean success;
+    };
+  };
+};

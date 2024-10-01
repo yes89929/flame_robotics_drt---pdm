@@ -1,0 +1,23 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from rbpodo_msgs/msg/MovePbPoint.msg
+// generated code does not contain a copyright notice
+
+
+module rbpodo_msgs {
+  module msg {
+    typedef float float__6[6];
+    module MovePbPoint_Constants {
+      const uint8 BLENDING_OPTION_RATIO = 0;
+      const uint8 BLENDING_OPTION_DISTANCE = 1;
+    };
+    struct MovePbPoint {
+      float__6 point;
+
+      float speed;
+
+      uint8 blending_option;
+
+      float blending_value;
+    };
+  };
+};

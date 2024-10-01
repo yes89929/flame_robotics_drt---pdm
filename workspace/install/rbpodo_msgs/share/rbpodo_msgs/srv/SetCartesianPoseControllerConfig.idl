@@ -1,0 +1,29 @@
+// generated from rosidl_adapter/resource/srv.idl.em
+// with input from rbpodo_msgs/srv/SetCartesianPoseControllerConfig.srv
+// generated code does not contain a copyright notice
+
+
+module rbpodo_msgs {
+  module srv {
+    @verbatim (language="comment", text=
+      "Arrival time to the destination (unit: sec. t1 >= 0.002)")
+    struct SetCartesianPoseControllerConfig_Request {
+      double t1;
+
+      @verbatim (language="comment", text=
+        "Time to maintain the action after arrival (unit: sec. 0.02 < t2 < 0.2)")
+      double t2;
+
+      @verbatim (language="comment", text=
+        "Speed tracking rate (gain > 0)")
+      double gain;
+
+      @verbatim (language="comment", text=
+        "Low-pass filter gain (The smaller it is, the smoother the action becomes. 0 < alpha < 1)")
+      double alpha;
+    };
+    struct SetCartesianPoseControllerConfig_Response {
+      boolean success;
+    };
+  };
+};
