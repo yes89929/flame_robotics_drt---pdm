@@ -1,3 +1,0 @@
-# eval(...)
-
-string  script

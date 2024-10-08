@@ -1,4 +1,0 @@
-uint8 REAL=0
-uint8 SIMULATION=1
-
-uint8 mode 1
