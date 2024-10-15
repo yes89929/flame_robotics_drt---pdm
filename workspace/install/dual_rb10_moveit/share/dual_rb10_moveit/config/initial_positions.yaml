@@ -1,0 +1,15 @@
+# Default initial positions for dual_rb10_1300e's ros2_control fake system
+
+initial_positions:
+  base_detector: 0
+  base_source: 0
+  elbow_detector: 0
+  elbow_source: 0
+  shoulder_detector: 0
+  shoulder_source: 0
+  wrist1_detector: 0
+  wrist1_source: 0
+  wrist2_detector: 0
+  wrist2_source: 0
+  wrist3_detector: 0
+  wrist3_source: 0

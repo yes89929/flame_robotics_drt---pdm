@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--This does not replace URDF, and is not an extension of URDF.
+    This is a format for representing semantic information about the robot structure.
+    A URDF file must exist for this robot as well, where the joints and the links that are referenced are defined
+-->
+<robot name="dual_rb10_1300e">
+    <!--GROUPS: Representation of a set of joints and links. This can be useful for specifying DOF to plan for, defining arms, end effectors, etc-->
+    <!--LINKS: When a link is specified, the parent joint of that link (if it exists) is automatically included-->
+    <!--JOINTS: When a joint is specified, the child link of that joint (which will always exist) is automatically included-->
+    <!--CHAINS: When a chain is specified, all the links along the chain (including endpoints) are included in the group. Additionally, all the joints that are parents to included links are also included. This means that joints along the chain and the parent joint of the base link are included in the group-->
+    <!--SUBGROUPS: Groups can also be formed by referencing to already defined group names-->
+    <group name="rb10_source">
+        <joint name="base_source"/>
+        <joint name="shoulder_source"/>
+        <joint name="elbow_source"/>
+        <joint name="wrist1_source"/>
+        <joint name="wrist2_source"/>
+        <joint name="wrist3_source"/>
+        <joint name="tcp_joint_source"/>
+    </group>
+    <group name="rb10_detector">
+        <joint name="base_detector"/>
+        <joint name="shoulder_detector"/>
+        <joint name="elbow_detector"/>
+        <joint name="wrist1_detector"/>
+        <joint name="wrist2_detector"/>
+        <joint name="wrist3_detector"/>
+        <joint name="tcp_joint_detector"/>
+    </group>
+    <!--DISABLE COLLISIONS: By default it is assumed that any link of the robot could potentially come into collision with any other link in the robot. This tag disables collision checking between a specified pair of links. -->
+    <disable_collisions link1="link0_detector" link2="link0_source" reason="Adjacent"/>
+    <disable_collisions link1="link0_detector" link2="link1_detector" reason="Adjacent"/>
+    <disable_collisions link1="link0_detector" link2="link1_source" reason="Never"/>
+    <disable_collisions link1="link0_detector" link2="link2_detector" reason="Never"/>
+    <disable_collisions link1="link0_detector" link2="link2_source" reason="Never"/>
+    <disable_collisions link1="link0_detector" link2="link4_detector" reason="Never"/>
+    <disable_collisions link1="link0_detector" link2="link5_detector" reason="Never"/>
+    <disable_collisions link1="link0_source" link2="link1_detector" reason="Never"/>
+    <disable_collisions link1="link0_source" link2="link1_source" reason="Adjacent"/>
+    <disable_collisions link1="link0_source" link2="link2_detector" reason="Never"/>
+    <disable_collisions link1="link0_source" link2="link2_source" reason="Never"/>
+    <disable_collisions link1="link0_source" link2="link4_source" reason="Never"/>
+    <disable_collisions link1="link0_source" link2="link5_source" reason="Never"/>
+    <disable_collisions link1="link1_detector" link2="link1_source" reason="Never"/>
+    <disable_collisions link1="link1_detector" link2="link2_detector" reason="Adjacent"/>
+    <disable_collisions link1="link1_detector" link2="link2_source" reason="Never"/>
+    <disable_collisions link1="link1_detector" link2="link4_detector" reason="Never"/>
+    <disable_collisions link1="link1_detector" link2="link5_detector" reason="Never"/>
+    <disable_collisions link1="link1_source" link2="link2_detector" reason="Never"/>
+    <disable_collisions link1="link1_source" link2="link2_source" reason="Adjacent"/>
+    <disable_collisions link1="link1_source" link2="link4_source" reason="Never"/>
+    <disable_collisions link1="link1_source" link2="link5_source" reason="Never"/>
+    <disable_collisions link1="link2_detector" link2="link3_detector" reason="Adjacent"/>
+    <disable_collisions link1="link2_source" link2="link3_source" reason="Adjacent"/>
+    <disable_collisions link1="link3_detector" link2="link4_detector" reason="Adjacent"/>
+    <disable_collisions link1="link3_detector" link2="link5_detector" reason="Never"/>
+    <disable_collisions link1="link3_source" link2="link4_source" reason="Adjacent"/>
+    <disable_collisions link1="link3_source" link2="link5_source" reason="Never"/>
+    <disable_collisions link1="link4_detector" link2="link5_detector" reason="Adjacent"/>
+    <disable_collisions link1="link4_detector" link2="link6_detector" reason="Never"/>
+    <disable_collisions link1="link4_source" link2="link5_source" reason="Adjacent"/>
+    <disable_collisions link1="link4_source" link2="link6_source" reason="Never"/>
+    <disable_collisions link1="link5_detector" link2="link6_detector" reason="Adjacent"/>
+    <disable_collisions link1="link5_source" link2="link6_source" reason="Adjacent"/>
+</robot>
