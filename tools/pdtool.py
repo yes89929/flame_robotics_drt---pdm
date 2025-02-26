@@ -24,10 +24,10 @@ from util.logger.console import ConsoleLogger
 if __name__ == "__main__":
     
     console = ConsoleLogger.get_logger()
-    gui.Application.instance.initialize()
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', nargs='?', required=False, help="Configuration File(*.cfg)", default="default.cfg")
+    parser.add_argument('--file', nargs='?', required=True, help="Polygon File Format(*.ply)", default="default.ply")
     parser.add_argument('--verbose', nargs='?', required=False, help="Enable/Disable verbose", default=True)
     args = parser.parse_args()
 
@@ -44,10 +44,24 @@ if __name__ == "__main__":
                 console.info(f"+ Root Path : {configure['root_path']}")
                 console.info(f"+ Application Path : {configure['app_path']}")
                 console.info(f"+ Verbose Level : {configure['verbose']}")
-
-            app_window = AppWindow(config=configure)
-            
-            gui.Application.instance.run()
+                
+            if args.file:
+                # pcd = o3d.io.read_point_cloud(args.file)
+                # pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]]) # flip 
+                
+                # axis_aligned_bounding_box = pcd.get_axis_aligned_bounding_box()
+                # axis_aligned_bounding_box.color = (1, 0, 0)
+                
+                mesh = o3d.io.read_triangle_mesh(args.file)
+                mesh.compute_vertex_normals()
+                pcl = mesh.sample_points_poisson_disk(number_of_points=10000)
+                hull, _ = pcl.compute_convex_hull()
+                hull_ls = o3d.geometry.LineSet.create_from_triangle_mesh(hull)
+                hull_ls.paint_uniform_color((1, 0, 0))
+    
+                # o3d.visualization.draw([pcd, axis_aligned_bounding_box, hull_ls])
+                o3d.visualization.draw([mesh, hull_ls])
+                
 
     except json.JSONDecodeError as e:
         console.critical(f"Configuration File Load Error : {e}")
