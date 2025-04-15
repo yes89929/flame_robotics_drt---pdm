@@ -8,7 +8,7 @@ PROTO Rb101300e_source [
   field  SFVec3f     translation     0 0 1
   field  SFRotation  rotation        0 0 1 0
   field  SFString    name            "Rb101300e_source"  # Is `Robot.name`.
-  field  SFString    controller      "void"       # Is `Robot.controller`.
+  field  SFString    controller      "Rb101300e_source"  # Is `Robot.controller`.
   field  MFString    controllerArgs  []           # Is `Robot.controllerArgs`.
   field  SFString    customData      ""           # Is `Robot.customData`.
   field  SFBool      supervisor      FALSE        # Is `Robot.supervisor`.
@@ -28,7 +28,7 @@ PROTO Rb101300e_source [
     selfCollision IS selfCollision
     children [
       DEF link0_visual CadShape {
-        url "/home/dev/dev/flame_robotics_drt/simulation/webots/protos/Rb101300e_source_textures/visual/link0.dae"
+        url "../protos/Rb101300e_source_textures/visual/link0.dae"
       }
       HingeJoint {
         jointParameters HingeJointParameters {
@@ -51,7 +51,7 @@ PROTO Rb101300e_source [
           translation 0.000000 0.000000 0.197000
           children [
             DEF link1_visual CadShape {
-              url "/home/dev/dev/flame_robotics_drt/simulation/webots/protos/Rb101300e_source_textures/visual/link1.dae"
+              url "../protos/Rb101300e_source_textures/visual/link1.dae"
             }
             HingeJoint {
               jointParameters HingeJointParameters {
@@ -74,7 +74,7 @@ PROTO Rb101300e_source [
                 translation 0.000000 -0.187500 0.000000
                 children [
                   DEF link2_visual CadShape {
-                    url "/home/dev/dev/flame_robotics_drt/simulation/webots/protos/Rb101300e_source_textures/visual/link2.dae"
+                    url "../protos/Rb101300e_source_textures/visual/link2.dae"
                   }
                   HingeJoint {
                     jointParameters HingeJointParameters {
@@ -97,7 +97,7 @@ PROTO Rb101300e_source [
                       translation 0.000000 0.000000 0.612700
                       children [
                         DEF link3_visual CadShape {
-                          url "/home/dev/dev/flame_robotics_drt/simulation/webots/protos/Rb101300e_source_textures/visual/link3.dae"
+                          url "../protos/Rb101300e_source_textures/visual/link3.dae"
                         }
                         HingeJoint {
                           jointParameters HingeJointParameters {
@@ -120,7 +120,7 @@ PROTO Rb101300e_source [
                             translation 0.000000 0.117150 0.570150
                             children [
                               DEF link4_visual CadShape {
-                                url "/home/dev/dev/flame_robotics_drt/simulation/webots/protos/Rb101300e_source_textures/visual/link4.dae"
+                                url "../protos/Rb101300e_source_textures/visual/link4.dae"
                               }
                               HingeJoint {
                                 jointParameters HingeJointParameters {
@@ -143,7 +143,7 @@ PROTO Rb101300e_source [
                                   translation 0.000000 -0.117150 0.000000
                                   children [
                                     DEF link5_visual CadShape {
-                                      url "/home/dev/dev/flame_robotics_drt/simulation/webots/protos/Rb101300e_source_textures/visual/link5.dae"
+                                      url "../protos/Rb101300e_source_textures/visual/link5.dae"
                                     }
                                     HingeJoint {
                                       jointParameters HingeJointParameters {
@@ -166,7 +166,7 @@ PROTO Rb101300e_source [
                                         translation 0.000000 0.000000 0.117150
                                         children [
                                           DEF link6_visual CadShape {
-                                            url "/home/dev/dev/flame_robotics_drt/simulation/webots/protos/Rb101300e_source_textures/visual/link6.dae"
+                                            url "../protos/Rb101300e_source_textures/visual/link6.dae"
                                           }
                                           Solid {
                                             translation 0.000000 -0.115300 0.000000
@@ -185,7 +185,7 @@ PROTO Rb101300e_source [
                                         ]
                                         name "link6"
                                         boundingObject DEF link6 Mesh {
-                                          url "/home/dev/dev/flame_robotics_drt/simulation/webots/protos/Rb101300e_source_textures/collision/link6.stl"
+                                          url "../protos/Rb101300e_source_textures/collision/link6.stl"
                                         }
                                         physics Physics {
                                           density -1
@@ -201,7 +201,7 @@ PROTO Rb101300e_source [
                                   ]
                                   name "link5"
                                   boundingObject DEF link5 Mesh {
-                                    url "/home/dev/dev/flame_robotics_drt/simulation/webots/protos/Rb101300e_source_textures/collision/link5.stl"
+                                    url "../protos/Rb101300e_source_textures/collision/link5.stl"
                                   }
                                   physics Physics {
                                     density -1
@@ -217,7 +217,7 @@ PROTO Rb101300e_source [
                             ]
                             name "link4"
                             boundingObject DEF link4 Mesh {
-                              url "/home/dev/dev/flame_robotics_drt/simulation/webots/protos/Rb101300e_source_textures/collision/link4.stl"
+                              url "../protos/Rb101300e_source_textures/collision/link4.stl"
                             }
                             physics Physics {
                               density -1
@@ -233,7 +233,7 @@ PROTO Rb101300e_source [
                       ]
                       name "link3"
                       boundingObject DEF link3 Mesh {
-                        url "/home/dev/dev/flame_robotics_drt/simulation/webots/protos/Rb101300e_source_textures/collision/link3.stl"
+                        url "../protos/Rb101300e_source_textures/collision/link3.stl"
                       }
                       physics Physics {
                         density -1
@@ -249,7 +249,7 @@ PROTO Rb101300e_source [
                 ]
                 name "link2"
                 boundingObject DEF link2 Mesh {
-                  url "/home/dev/dev/flame_robotics_drt/simulation/webots/protos/Rb101300e_source_textures/collision/link2.stl"
+                  url "../protos/Rb101300e_source_textures/collision/link2.stl"
                 }
                 physics Physics {
                   density -1
@@ -265,7 +265,7 @@ PROTO Rb101300e_source [
           ]
           name "link1"
           boundingObject DEF link1 Mesh {
-            url "/home/dev/dev/flame_robotics_drt/simulation/webots/protos/Rb101300e_source_textures/collision/link1.stl"
+            url "../protos/Rb101300e_source_textures/collision/link1.stl"
           }
           physics Physics {
             density -1
@@ -281,11 +281,8 @@ PROTO Rb101300e_source [
     ]
     name IS name
     boundingObject DEF link0 Mesh {
-      url "/home/dev/dev/flame_robotics_drt/simulation/webots/protos/Rb101300e_source_textures/collision/link0.stl"
+      url "../protos/Rb101300e_source_textures/collision/link0.stl"
     }
-    physics Physics {
-	    density -1
-	    mass 0
-    }
+
   }
 }
