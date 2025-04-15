@@ -1,0 +1,28 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "../protos/Rb101300e_source.proto"
+
+WorldInfo {
+  title "DRT World"
+}
+Viewpoint {
+  orientation 0.09373807818613526 0.178038294463116 -0.9795486401412821 0.9863294748343588
+  position -2.3985042774162313 4.8302954523693415 2.215253801171473
+}
+Background {
+  skyColor [
+    0.9 0.9 0.9
+  ]
+}
+DirectionalLight {
+  ambientIntensity 1
+  direction 0.1 -0.5 0.3
+}
+RectangleArena {
+  floorSize 10 10
+}
+Rb101300e_source {
+  translation 1 0 2.1
+  rotation -0.6977927345425983 0.7162997275020861 3.345838727161217e-09 3.14159
+}
