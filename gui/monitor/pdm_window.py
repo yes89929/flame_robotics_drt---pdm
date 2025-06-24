@@ -37,8 +37,13 @@ class AppWindow(QMainWindow):
                 ui_path = pathlib.Path(config["app_path"]) / config["pdm_gui"]
                 if os.path.isfile(ui_path):
                     loadUi(ui_path, self)
+                    self.setWindowTitle(config.get("pdm_window_title", "Pose Detection View"))
+                    self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.CustomizeWindowHint | Qt.WindowType.WindowTitleHint)
+
+                    self.show()
                 else:
                     raise Exception(f"Cannot found UI file : {ui_path}")
+            
 
         except Exception as e:
             self.__console.error(f"{e}")

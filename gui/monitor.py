@@ -21,9 +21,7 @@ APP_NAME = pathlib.Path(__file__).stem
 sys.path.append(ROOT_PATH.as_posix())
 
 import argparse
-from gui.monitor.main_window import AppWindow as MainWindow
-from gui.monitor.pdm_window import AppWindow as PDMWindow
-from gui.monitor.rcm_window import AppWindow as RCMWindow
+from gui.monitor.main_window import AppWindow
 from util.logger.console import ConsoleLogger
 
 
@@ -54,17 +52,9 @@ if __name__ == "__main__":
             font_id = QFontDatabase.addApplicationFont((ROOT_PATH / configure['font_path']).as_posix())
             font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
             app.setFont(QFont(font_family, 12))
-            main_window = MainWindow(config=configure)
-            pdm_window = PDMWindow(config=configure)
-            rcm_window = RCMWindow(config=configure)
+            main_window = AppWindow(config=configure)
 
-            main_window.setWindowTitle(configure.get("main_window_title", "Main Window"))
-            pdm_window.setWindowTitle(configure.get("pdm_window_title", "Pose Detection Module"))
-            rcm_window.setWindowTitle(configure.get("rcm_window_title", "Robot Control Module"))
-            
             main_window.show()
-            pdm_window.show()
-            rcm_window.show()
             sys.exit(app.exec())
 
     except json.JSONDecodeError as e:

@@ -18,6 +18,8 @@ import os, sys
 import pathlib
 
 from util.logger.console import ConsoleLogger
+from gui.monitor.pdm_window import AppWindow as PDMWindow
+from gui.monitor.rcm_window import AppWindow as RCMWindow
 
 
 class AppWindow(QMainWindow):
@@ -28,6 +30,10 @@ class AppWindow(QMainWindow):
         self.__console = ConsoleLogger.get_logger() # logger
         self.__config = config  # copy configuration data
 
+        # sub windows
+        self.__pdm_window = PDMWindow(config)
+        self.__rcm_window = RCMWindow(config)
+
         ### configure zmq context
         n_ctx_value = config.get("n_io_context", 14)
         self.__pipeline_context = zmq.Context(n_ctx_value) # zmq context
@@ -37,6 +43,8 @@ class AppWindow(QMainWindow):
                 ui_path = pathlib.Path(config["app_path"]) / config["main_gui"]
                 if os.path.isfile(ui_path):
                     loadUi(ui_path, self)
+
+                    self.setWindowTitle(config.get("main_window_title", "DRT Control Simulation Window"))
                 else:
                     raise Exception(f"Cannot found UI file : {ui_path}")
                 
@@ -50,6 +58,9 @@ class AppWindow(QMainWindow):
 
     def closeEvent(self, event:QCloseEvent) -> None:
         """ Handle close event """
+        for sub in [self.__pdm_window, self.__rcm_window]:
+            if sub.isVisible():
+                sub.close()
 
         self.__pipeline_context.destroy(0)
 

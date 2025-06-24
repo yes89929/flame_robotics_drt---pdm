@@ -37,6 +37,10 @@ class AppWindow(QMainWindow):
                 ui_path = pathlib.Path(config["app_path"]) / config["rcm_gui"]
                 if os.path.isfile(ui_path):
                     loadUi(ui_path, self)
+                    self.setWindowTitle(config.get("rcm_window_title", "Robot Control View"))
+                    self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.CustomizeWindowHint | Qt.WindowType.WindowTitleHint)
+
+                    self.show()
                 else:
                     raise Exception(f"Cannot found UI file : {ui_path}")
 
