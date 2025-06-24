@@ -34,6 +34,7 @@ class AppWindow(QMainWindow):
         # sub windows
         self.__pdm_window = PDMWindow(config)
         self.__rcm_window = RCMWindow(config)
+        # self.__pcd_viewer = PCDViewer()
 
         ### configure zmq context
         n_ctx_value = config.get("n_io_context", 14)
@@ -65,6 +66,8 @@ class AppWindow(QMainWindow):
         for sub in [self.__pdm_window, self.__rcm_window]:
             if sub.isVisible():
                 sub.close()
+
+        # self.__pcd_viewer.destroy()
 
         self.__pipeline_context.destroy(0)
 
