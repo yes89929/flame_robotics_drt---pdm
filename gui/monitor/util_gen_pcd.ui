@@ -181,6 +181,12 @@ background-color: rgb(212, 212, 212);</string>
    </property>
   </action>
  </widget>
+ <tabstops>
+  <tabstop>edit_sample_points</tabstop>
+  <tabstop>edit_noise</tabstop>
+  <tabstop>chk_without_noise</tabstop>
+  <tabstop>btn_generate</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
  <designerdata>
