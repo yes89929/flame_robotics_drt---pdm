@@ -44,6 +44,8 @@ class AppWindow(QMainWindow):
             self.__console.error(f"{e}")
 
 
-    def closeEvent(self, event:QCloseEvent) -> None:             
+    def closeEvent(self, event:QCloseEvent) -> None:
+        """ Handle close event """
+        self.__pipeline_context.destroy(0)
         return super().closeEvent(event)
 

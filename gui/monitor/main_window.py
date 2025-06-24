@@ -39,11 +39,37 @@ class AppWindow(QMainWindow):
                     loadUi(ui_path, self)
                 else:
                     raise Exception(f"Cannot found UI file : {ui_path}")
+                
+            # interface components callbacks
+            self.btn_open_pcd.clicked.connect(self.on_open_pcd)
+            self.btn_open_markers.clicked.connect(self.on_open_markers)
 
         except Exception as e:
             self.__console.error(f"{e}")
 
 
-    def closeEvent(self, event:QCloseEvent) -> None:             
+    def closeEvent(self, event:QCloseEvent) -> None:
+        """ Handle close event """
+
+        self.__pipeline_context.destroy(0)
+
         return super().closeEvent(event)
+    
+    def on_open_pcd(self):
+        """ Open PCD file dialog """
+        pcd_file, _ = QFileDialog.getOpenFileName(self, "Open PCD File", "", "PCD Files (*.pcd);;All Files (*)")
+        if pcd_file:
+            self.__console.info(f"Selected PCD file: {pcd_file}")
+            # Here you can add code to handle the selected PCD file
+        else:
+            self.__console.warning("No PCD file selected.")
+
+    def on_open_markers(self):
+        """ Open Markers file dialog """
+        markers_file, _ = QFileDialog.getOpenFileName(self, "Open Markers File", "", "Markers Files (*.markers);;All Files (*)")
+        if markers_file:
+            self.__console.info(f"Selected Markers file: {markers_file}")
+            # Here you can add code to handle the selected Markers file
+        else:
+            self.__console.warning("No Markers file selected.")
 
