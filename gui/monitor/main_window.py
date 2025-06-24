@@ -20,7 +20,7 @@ import pathlib
 from util.logger.console import ConsoleLogger
 from gui.monitor.pdm_window import AppWindow as PDMWindow
 from gui.monitor.rcm_window import AppWindow as RCMWindow
-
+from gui.monitor.pcdviewer import PCDViewer
 
 
 class AppWindow(QMainWindow):
