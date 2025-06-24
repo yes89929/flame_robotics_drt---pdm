@@ -33,10 +33,8 @@ class AppWindow(QMainWindow):
         self.__pipeline_context = zmq.Context(n_ctx_value) # zmq context
 
         try:            
-            if "gui" in config:
-
-                # load UI File
-                ui_path = pathlib.Path(config["app_path"]) / config["gui"]
+            if "pdm_gui" in config:
+                ui_path = pathlib.Path(config["app_path"]) / config["pdm_gui"]
                 if os.path.isfile(ui_path):
                     loadUi(ui_path, self)
                 else:

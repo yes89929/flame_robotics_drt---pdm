@@ -21,7 +21,8 @@ APP_NAME = pathlib.Path(__file__).stem
 sys.path.append(ROOT_PATH.as_posix())
 
 import argparse
-from monitor.window import AppWindow
+from gui.monitor.main_window import AppWindow as MainWindow
+from gui.monitor.pdm_window import AppWindow as PDMWindow
 from util.logger.console import ConsoleLogger
 
 
@@ -43,19 +44,23 @@ if __name__ == "__main__":
             configure["app_path"] = (pathlib.Path(__file__).parent / APP_NAME)
             configure["verbose_level"] = args.verbose_level.upper()
 
-            if args.verbose_level.upper() == "DEBUG":
+            if configure["verbose_level"] == "DEBUG":
                 console.debug(f"Root Path : {configure['root_path']}")
                 console.debug(f"Application Path : {configure['app_path']}")
+                console.debug(f"Verbose Level : {configure['verbose_level']}")
 
             app = QApplication(sys.argv)
             font_id = QFontDatabase.addApplicationFont((ROOT_PATH / configure['font_path']).as_posix())
             font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
             app.setFont(QFont(font_family, 12))
-            app_window = AppWindow(config=configure)
+            main_window = MainWindow(config=configure)
+            pdm_window = PDMWindow(config=configure)
+
+            main_window.setWindowTitle(configure.get("main_window_title", "Main Window"))
+            pdm_window.setWindowTitle(configure.get("pdm_window_title", "Pose Detection Module"))
             
-            if "app_window_title" in configure:
-                app_window.setWindowTitle(configure["app_window_title"])
-            app_window.show()
+            main_window.show()
+            pdm_window.show()
             sys.exit(app.exec())
 
     except json.JSONDecodeError as e:
