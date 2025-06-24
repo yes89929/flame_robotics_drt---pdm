@@ -47,7 +47,7 @@
       <rect>
        <x>15</x>
        <y>30</y>
-       <width>151</width>
+       <width>181</width>
        <height>26</height>
       </rect>
      </property>
@@ -61,9 +61,9 @@
     <widget class="QLineEdit" name="edit_pcd_file">
      <property name="geometry">
       <rect>
-       <x>175</x>
+       <x>205</x>
        <y>30</y>
-       <width>511</width>
+       <width>481</width>
        <height>26</height>
       </rect>
      </property>
@@ -76,7 +76,7 @@
       <rect>
        <x>15</x>
        <y>70</y>
-       <width>151</width>
+       <width>181</width>
        <height>26</height>
       </rect>
      </property>
@@ -90,9 +90,9 @@
     <widget class="QLineEdit" name="edit_marker_file">
      <property name="geometry">
       <rect>
-       <x>175</x>
+       <x>210</x>
        <y>70</y>
-       <width>511</width>
+       <width>476</width>
        <height>26</height>
       </rect>
      </property>
