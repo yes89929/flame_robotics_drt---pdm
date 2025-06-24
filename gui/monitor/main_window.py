@@ -22,6 +22,7 @@ from gui.monitor.pdm_window import AppWindow as PDMWindow
 from gui.monitor.rcm_window import AppWindow as RCMWindow
 
 
+
 class AppWindow(QMainWindow):
     def __init__(self, config:dict):
         """ initialization """
@@ -45,6 +46,9 @@ class AppWindow(QMainWindow):
                     loadUi(ui_path, self)
 
                     self.setWindowTitle(config.get("main_window_title", "DRT Control Simulation Window"))
+
+                    # actions
+                    self.actionGeneratePCD.triggered.connect(self.on_select_generate_pcd)
                 else:
                     raise Exception(f"Cannot found UI file : {ui_path}")
                 
@@ -83,4 +87,17 @@ class AppWindow(QMainWindow):
             # Here you can add code to handle the selected Markers file
         else:
             self.__console.warning("No Markers file selected.")
+
+    def on_select_generate_pcd(self):
+        """ 3D Model to PCD file generation """
+        from gui.monitor.util_gen_pcd import AppWindow as GenPCDWindow
+        model_file, _ = QFileDialog.getOpenFileName(self, "Open STL File", "", "STL Files (*.stl);;All Files (*)")
+        if model_file:
+            wnd = GenPCDWindow(config=self.__config, target=model_file)
+            wnd.show()
+
+            self.__console.info(f"Selected 3D model file: {model_file}")
+
+        
+
 
