@@ -2,6 +2,6 @@ PyQt6==6.7.0
 colorlog
 pyqtgraph
 pyzmq
-trimesh
 open3d
+trimesh
 numpy

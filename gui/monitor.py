@@ -14,6 +14,7 @@ except ImportError:
 import sys, os
 import pathlib
 import json
+import atexit
 
 # root directory registration on system environment
 ROOT_PATH = pathlib.Path(__file__).parent.parent
@@ -21,8 +22,12 @@ APP_NAME = pathlib.Path(__file__).stem
 sys.path.append(ROOT_PATH.as_posix())
 
 import argparse
-from gui.monitor.main_window import AppWindow
+import multiprocessing
+from multiprocessing import Process
+from gui.monitor.main_window import AppWindow as MainWindow
+from gui.monitor.graphic_window import Graphic3DWindow
 from util.logger.console import ConsoleLogger
+
 
 
 if __name__ == "__main__":
@@ -30,6 +35,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', nargs='?', required=False, help="Configuration File(*.cfg)", default="default.cfg")
     parser.add_argument('--verbose_level', nargs='?', required=False, help="Set Verbose Level", default="DEBUG")
+    parser.add_argument('--show_graphic', required=False, action='store_true', help="Show Graphic Window", default=True)
     args = parser.parse_args()
 
     console = ConsoleLogger.get_logger(level="DEBUG")
@@ -52,9 +58,15 @@ if __name__ == "__main__":
             font_id = QFontDatabase.addApplicationFont((ROOT_PATH / configure['font_path']).as_posix())
             font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
             app.setFont(QFont(font_family, 12))
-            main_window = AppWindow(config=configure)
-
+            main_window = MainWindow(config=configure)
             main_window.show()
+
+            # show graphic window
+            if args.show_graphic:
+                graphic_window = Graphic3DWindow(config=configure)
+                graphic_window.start()
+                atexit.register(graphic_window.close)
+
             sys.exit(app.exec())
 
     except json.JSONDecodeError as e:

@@ -20,7 +20,7 @@ import pathlib
 from util.logger.console import ConsoleLogger
 from gui.monitor.pdm_window import AppWindow as PDMWindow
 from gui.monitor.rcm_window import AppWindow as RCMWindow
-from gui.monitor.pcdviewer import PCDViewer
+
 
 
 class AppWindow(QMainWindow):
@@ -34,7 +34,6 @@ class AppWindow(QMainWindow):
         # sub windows
         self.__pdm_window = PDMWindow(config)
         self.__rcm_window = RCMWindow(config)
-        # self.__pcd_viewer = PCDViewer()
 
         ### configure zmq context
         n_ctx_value = config.get("n_io_context", 14)
@@ -49,14 +48,15 @@ class AppWindow(QMainWindow):
                     self.setWindowTitle(config.get("main_window_title", "DRT Control Simulation Window"))
 
                     # actions
-                    self.actionGeneratePCD.triggered.connect(self.on_select_generate_pcd)
+                    self.actionUtilGeneratePCD.triggered.connect(self.on_select_generate_pcd)
+
+                    # interface components callbacks
+                    self.btn_open_pcd.clicked.connect(self.on_open_pcd)
+                    self.btn_open_markers.clicked.connect(self.on_open_markers)
+
                 else:
                     raise Exception(f"Cannot found UI file : {ui_path}")
                 
-            # interface components callbacks
-            self.btn_open_pcd.clicked.connect(self.on_open_pcd)
-            self.btn_open_markers.clicked.connect(self.on_open_markers)
-
         except Exception as e:
             self.__console.error(f"{e}")
 
@@ -67,9 +67,9 @@ class AppWindow(QMainWindow):
             if sub.isVisible():
                 sub.close()
 
-        # self.__pcd_viewer.destroy()
-
         self.__pipeline_context.destroy(0)
+
+        self.__console.info("Application successfully terminated.")
 
         return super().closeEvent(event)
     
@@ -78,7 +78,7 @@ class AppWindow(QMainWindow):
         pcd_file, _ = QFileDialog.getOpenFileName(self, "Open PCD File", "", "PCD Files (*.pcd);;All Files (*)")
         if pcd_file:
             self.__console.info(f"Selected PCD file: {pcd_file}")
-            # Here you can add code to handle the selected PCD file
+            self.__pcd_viewer.add_pcd(pcd_file)
         else:
             self.__console.warning("No PCD file selected.")
 
