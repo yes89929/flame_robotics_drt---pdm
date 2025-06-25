@@ -21,6 +21,7 @@ import multiprocessing
 from util.logger.console import ConsoleLogger
 import zmq
 import json
+import numpy as np
 
 
 class Graphic3DWindow():
@@ -108,16 +109,18 @@ class Graphic3DWindow():
         except zmq.ZMQError as e:
             print(f"[Graphic 3D Window] {e}")
 
-    # @staticmethod
-    def render_origin_coord(position:tuple=(0,0,0), size:tuple=(1,1,1), color:tuple=(1,1,1), create_uv_map:bool=False):
+    @staticmethod
+    def box(position:list=[0,0,0], orientation=[0,0,0], size:list=[1,1,1], color:list=[1,1,1]):
         """ (x,y,z), (w,h,d), (r,g,b)"""
         import open3d as o3d
         box = o3d.geometry.TriangleMesh.create_box(*size)
-        box.paint_uniform_color(*color)
+        box.paint_uniform_color(color)
         box.translate([-0.5, -0.5, -0.5]) # align to center
-        # box.compute_vertex_normals()
-        # _vis.add_geometry(box)
-        # _geometries.append(box)
+        box.compute_vertex_normals()
+        box.translate(position) # translation
+        R = box.get_rotation_matrix_from_axis_angle(orientation) # rotation
+        box.rotate(R, center=(0, 0, 0))
+        return box
 
 
     @staticmethod
@@ -130,12 +133,15 @@ class Graphic3DWindow():
 
             _vis = o3d.visualization.Visualizer()
             _vis.create_window(window_name='3D Graphic Viewer', width=1920, height=1080, left=50, top=50)
-            _vis.get_render_option().background_color = [0.9, 0.9, 0.9]
+            _vis.get_render_option().background_color = [1.0, 1.0, 1.0]
 
-            a = (1,1,1)
-            box = o3d.geometry.TriangleMesh.create_box(*a)
-            box.paint_uniform_color([0.2, 0.8, 0.2])
-            box.compute_vertex_normals()
+            box = Graphic3DWindow.box(position=[1,0,0], size=[1,1,1], color=[0.2, 0.8, 0.2])
+            print(box)
+
+            # size = [1,0.5,1]
+            # box = o3d.geometry.TriangleMesh.create_box(*size)
+            # box.paint_uniform_color([0.2, 0.8, 0.2])
+            # box.compute_vertex_normals()
             _vis.add_geometry(box)
             _geometries.append(box)
 
