@@ -21,7 +21,7 @@ from util.logger.console import ConsoleLogger
 
 
 class AppWindow(QMainWindow):
-    def __init__(self, config:dict):
+    def __init__(self, context:zmq.Context, config:dict):
         """ initialization """
         super().__init__()
         

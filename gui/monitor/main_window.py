@@ -16,6 +16,7 @@ except ImportError:
 import zmq
 import os, sys
 import pathlib
+import json
 
 from util.logger.console import ConsoleLogger
 from gui.monitor.pdm_window import AppWindow as PDMWindow
@@ -24,20 +25,22 @@ from gui.monitor.rcm_window import AppWindow as RCMWindow
 
 
 class AppWindow(QMainWindow):
-    def __init__(self, config:dict):
+    def __init__(self, context:zmq.Context, config:dict):
         """ initialization """
         super().__init__()
         
         self.__console = ConsoleLogger.get_logger() # logger
         self.__config = config  # copy configuration data
 
-        # sub windows
-        self.__pdm_window = PDMWindow(config)
-        self.__rcm_window = RCMWindow(config)
+        # publisher
+        self.__socket = context.socket(zmq.PUB)
+        self.__socket.setsockopt(zmq.RCVBUF .RCVHWM, 100)
+        self.__socket.setsockopt(zmq.LINGER, 0)
+        self.__socket.bind("tcp://*:9000")
 
-        ### configure zmq context
-        n_ctx_value = config.get("n_io_context", 14)
-        self.__pipeline_context = zmq.Context(n_ctx_value) # zmq context
+        # sub windows
+        self.__pdm_window = PDMWindow(context, config)
+        self.__rcm_window = RCMWindow(context, config)
 
         try:            
             if "main_gui" in config:
@@ -53,6 +56,7 @@ class AppWindow(QMainWindow):
                     # interface components callbacks
                     self.btn_open_pcd.clicked.connect(self.on_open_pcd)
                     self.btn_open_markers.clicked.connect(self.on_open_markers)
+                    self.chk_show_origin_coord.toggled.connect(self.on_show_origin_coord)
 
                 else:
                     raise Exception(f"Cannot found UI file : {ui_path}")
@@ -67,10 +71,7 @@ class AppWindow(QMainWindow):
             if sub.isVisible():
                 sub.close()
 
-        self.__pipeline_context.destroy(0)
-
-        self.__console.info("Application successfully terminated.")
-
+        self.__console.info("Closing main window and destroying zmq context.")
         return super().closeEvent(event)
     
     def on_open_pcd(self):
@@ -100,6 +101,19 @@ class AppWindow(QMainWindow):
             wnd.show()
 
             self.__console.info(f"Selected 3D model file: {model_file}")
+
+    def on_show_origin_coord(self, checked:bool):
+        try:
+            topic = "call"
+            message = { "function":"show_origin_coord",
+                "args":{ "show":checked}
+            }
+            jmsg = json.dumps(message)
+            self.__socket.send_multipart([topic.encode(), jmsg.encode()])
+        except zmq.ZMQError as e:
+            self.__console.error(f"[Main Window] {e}")
+        except json.JSONDecodeError as e:
+            self.__console.error(f"[Main Window] JSON Decode Error: {e}")
 
         
 

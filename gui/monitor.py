@@ -23,6 +23,7 @@ sys.path.append(ROOT_PATH.as_posix())
 
 import argparse
 import multiprocessing
+import zmq
 from multiprocessing import Process
 from gui.monitor.main_window import AppWindow as MainWindow
 from gui.monitor.graphic_window import Graphic3DWindow
@@ -54,20 +55,27 @@ if __name__ == "__main__":
                 console.debug(f"Application Path : {configure['app_path']}")
                 console.debug(f"Verbose Level : {configure['verbose_level']}")
 
+            # zmq pipeline
+            n_ctx_value = configure.get("n_io_context", 10)
+            zmq_pipeline_context = zmq.Context(n_ctx_value)
+
             app = QApplication(sys.argv)
             font_id = QFontDatabase.addApplicationFont((ROOT_PATH / configure['font_path']).as_posix())
             font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
             app.setFont(QFont(font_family, 12))
-            main_window = MainWindow(config=configure)
+            main_window = MainWindow(zmq_pipeline_context, config=configure)
             main_window.show()
 
             # show graphic window
             if args.show_graphic:
                 graphic_window = Graphic3DWindow(config=configure)
-                graphic_window.start()
                 atexit.register(graphic_window.close)
 
             sys.exit(app.exec())
+
+            # terminate
+            zmq_pipeline_context.destroy(0)
+            console.info("Application successfully terminated.")
 
     except json.JSONDecodeError as e:
         console.critical(f"Configuration File Parse Exception : {e}")

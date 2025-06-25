@@ -12,117 +12,212 @@ try:
 except ImportError:
     print("PyQt6 is required to run this application.")
 
-import open3d as o3d
 import open3d.visualization.gui as gui
 import open3d.visualization.rendering as rendering
 import os
 import time
 import threading
-from multiprocessing import Process, Event
+import multiprocessing
 from util.logger.console import ConsoleLogger
+import zmq
+import json
 
 
-class Graphic3DWindow:
+class Graphic3DWindow():
     def __init__(self, config:dict):
         super().__init__()
 
-        self.__config = config  # copy configuration data
-        self.__stop_event = Event()
-        self.__vis = None
-        self.__geometries = []
+        # multiprocessing.set_start_method('spawn')
+        self.__console = ConsoleLogger.get_logger() # logger
 
-        self.__render_proc = Process(target=self._run, args=(self.__stop_event,), daemon=True)
-    
-    def start(self):
-        """ start graphic 3d viewer """
-        self.__render_proc.start()
+        self._config = config  # copy configuration data
+        self._stop_render_event = multiprocessing.Event()
+        self._stop_zmq_event = threading.Event()
+        self._vis = None
+        self._geometries = []
+
+        # manage zmq interface
+        self.context = zmq.Context(1)
+        self._socket = self.context.socket(zmq.SUB)
+        self._socket.setsockopt(zmq.RCVBUF .RCVHWM, 100)
+        self._socket.setsockopt(zmq.RCVTIMEO, 500)
+        self._socket.setsockopt(zmq.LINGER, 0)
+        self._socket.connect("tcp://localhost:9000")
+        self._socket.subscribe("call")
+
+        try:
+            # [note!!] shared queue must be passed to the multiprocessing process first
+            self._shared_queue = multiprocessing.Queue()
+            self._render_proc = multiprocessing.Process(target=self._render_process, args=(self._stop_render_event, self._shared_queue,), daemon=True)
+            self._render_proc.start()
+
+            self._zmq_pipeline_thread = threading.Thread(target=self.zmq_recv_process, args=(self._stop_zmq_event, self._shared_queue,), daemon=True)
+            self._zmq_pipeline_thread.start()
+        except Exception as e:
+            self.__console.debug("[Graphic 3D Window] Failed to create 3D rendering process")
+
+        self.__console.debug("[Graphic 3D Window] Start Graphic 3D Viewer")
+
+    def zmq_recv_process(self, stop_event, queue:multiprocessing.Queue):
+        """ zmq pipeline process for receiving data """
+
+        poller = zmq.Poller()
+        poller.register(self._socket, zmq.POLLIN)
+        
+        while not stop_event.is_set():
+            try:
+                events = dict(poller.poll(1000)) # wait 1 sec
+                if self._socket in events:
+                    if events[self._socket] == zmq.POLLIN:
+                        # for 'call' topic
+                        topic, msg = self._socket.recv_multipart()
+                        if topic.decode() == "call":
+                            data = json.loads(msg.decode('utf8').replace("'", '"'))
+                            queue.put(data)  # put data into the shared queue
+                
+            except json.JSONDecodeError as e:
+                print(f"[Graphic 3D Window] {e}")
+                continue
+            except zmq.ZMQError as e:
+                print(f"[Graphic 3D Window] {e}")
+                break
+            except Exception as e:
+                print(f"[Graphic 3D Window] {e}")
+                break
+
+        poller.unregister(self._socket)
 
     def close(self):
         """ close graphic 3d viewer """
-        self.__stop_event.set()
-        self.__render_proc.join(timeout=3)
+        print("[Graphic 3D Window] Closing Graphic 3D Viewer...")
 
-    def _run(self, stop_event):
-        self.__vis = o3d.visualization.Visualizer()
-        self.__vis.create_window(window_name='3D Graphic Viewer')
-        self.__vis.get_render_option().background_color = [0.9, 0.9, 0.9]
+        # terminate process
+        self._stop_render_event.set()
+        self._render_proc.join(timeout=3)
 
-        box = o3d.geometry.TriangleMesh.create_box()
-        box.paint_uniform_color([0.2, 0.8, 0.2])
-        box.compute_vertex_normals()
-        self.__vis.add_geometry(box)
-        self.__geometries.append(box)
+        # zmq pipeline terminate
+        self._stop_zmq_event.set()
+        self._zmq_pipeline_thread.join(timeout=3)
 
-        while not stop_event.is_set():
-            self.__vis.poll_events()
-            self.__vis.update_renderer()
-            time.sleep(0.03)
-            self.__console.debug("Rendering...")
+        try:
+            self._socket.setsockopt(zmq.LINGER, 0)
+            #self._poller.unregister(self.__socket)
+            self._socket.close()
 
-        self.__vis.destroy_window()
+            self.context.destroy(0)
+        except zmq.ZMQError as e:
+            print(f"[Graphic 3D Window] {e}")
+
+    # @staticmethod
+    def render_origin_coord(position:tuple=(0,0,0), size:tuple=(1,1,1), color:tuple=(1,1,1), create_uv_map:bool=False):
+        """ (x,y,z), (w,h,d), (r,g,b)"""
+        import open3d as o3d
+        box = o3d.geometry.TriangleMesh.create_box(*size)
+        box.paint_uniform_color(*color)
+        box.translate([-0.5, -0.5, -0.5]) # align to center
+        # box.compute_vertex_normals()
+        # _vis.add_geometry(box)
+        # _geometries.append(box)
+
+
+    @staticmethod
+    def _render_process(stop_event, queue:multiprocessing.Queue):
+        try:
+            console = ConsoleLogger.get_logger()
+
+            import open3d as o3d
+            _geometries = []
+
+            _vis = o3d.visualization.Visualizer()
+            _vis.create_window(window_name='3D Graphic Viewer', width=1920, height=1080, left=50, top=50)
+            _vis.get_render_option().background_color = [0.9, 0.9, 0.9]
+
+            a = (1,1,1)
+            box = o3d.geometry.TriangleMesh.create_box(*a)
+            box.paint_uniform_color([0.2, 0.8, 0.2])
+            box.compute_vertex_normals()
+            _vis.add_geometry(box)
+            _geometries.append(box)
+
+            axis = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+            _vis.add_geometry(axis)
+            _geometries.append(axis)
+            while not stop_event.is_set():
+                while not queue.empty():
+                    msg = queue.get()
+                    console.debug(f"[Graphic 3D Window] Received message via Pipe : {msg}")
+                _vis.poll_events()
+                _vis.update_renderer()
+                time.sleep(0.03)
+        except Exception as e:
+            print(f"[Graphic 3D Window] Error in rendering: {e}")
+
+        _vis.destroy_window()
+        _geometries.clear()
+        console.debug("[Graphic 3D Window] Render process terminated.")
         
 
-    def add_box(self):
-        box = o3d.geometry.TriangleMesh.create_box()
-        box.paint_uniform_color([0.2, 0.8, 0.2])
-        box.compute_vertex_normals()
-        self.geometry_list.append(box)
-        self.vis.add_geometry(box)
+    # def add_box(self):
+    #     box = o3d.geometry.TriangleMesh.create_box()
+    #     box.paint_uniform_color([0.2, 0.8, 0.2])
+    #     box.compute_vertex_normals()
+    #     self.geometry_list.append(box)
+    #     self.vis.add_geometry(box)
 
 
 
-    def _add_geometry(self, geometry, name):
-        # 각 지오메트리에 고유한 이름 부여
-        key = f"{name}_{self.counter}"
-        self.scene.scene.add_geometry(key, geometry, rendering.MaterialRecord())
-        self.geometry_map[key] = geometry
-        self.counter += 1
-        self._fit_scene()
+    # def _add_geometry(self, geometry, name):
+    #     # 각 지오메트리에 고유한 이름 부여
+    #     key = f"{name}_{self.counter}"
+    #     self.scene.scene.add_geometry(key, geometry, rendering.MaterialRecord())
+    #     self.geometry_map[key] = geometry
+    #     self.counter += 1
+    #     self._fit_scene()
 
-    def _add_box(self):
-        mesh = o3d.geometry.TriangleMesh.create_box(1, 1, 1)
-        mesh.paint_uniform_color([0.2, 0.8, 0.2])
-        mesh.compute_vertex_normals()
-        self._add_geometry(mesh, "box")
+    # def _add_box(self):
+    #     mesh = o3d.geometry.TriangleMesh.create_box(1, 1, 1)
+    #     mesh.paint_uniform_color([0.2, 0.8, 0.2])
+    #     mesh.compute_vertex_normals()
+    #     self._add_geometry(mesh, "box")
 
-    def _add_sphere(self):
-        mesh = o3d.geometry.TriangleMesh.create_sphere(radius=0.5)
-        mesh.paint_uniform_color([1, 0.5, 0])
-        mesh.compute_vertex_normals()
-        self._add_geometry(mesh, "sphere")
+    # def _add_sphere(self):
+    #     mesh = o3d.geometry.TriangleMesh.create_sphere(radius=0.5)
+    #     mesh.paint_uniform_color([1, 0.5, 0])
+    #     mesh.compute_vertex_normals()
+    #     self._add_geometry(mesh, "sphere")
 
-    def _add_pcd(self):
-        if not os.path.exists("example.pcd"):
-            print("example.pcd 파일이 현재 폴더에 없습니다.")
-            return
-        pcd = o3d.io.read_point_cloud("example.pcd")
-        mat = rendering.MaterialRecord()
-        mat.shader = "defaultUnlit"
-        mat.point_size = 5
-        key = f"pcd_{self.counter}"
-        self.scene.scene.add_geometry(key, pcd, mat)
-        self.geometry_map[key] = pcd
-        self.counter += 1
-        self._fit_scene()
+    # def _add_pcd(self):
+    #     if not os.path.exists("example.pcd"):
+    #         print("example.pcd 파일이 현재 폴더에 없습니다.")
+    #         return
+    #     pcd = o3d.io.read_point_cloud("example.pcd")
+    #     mat = rendering.MaterialRecord()
+    #     mat.shader = "defaultUnlit"
+    #     mat.point_size = 5
+    #     key = f"pcd_{self.counter}"
+    #     self.scene.scene.add_geometry(key, pcd, mat)
+    #     self.geometry_map[key] = pcd
+    #     self.counter += 1
+    #     self._fit_scene()
 
-    def _add_stl(self):
-        if not os.path.exists("model.stl"):
-            print("model.stl 파일이 현재 폴더에 없습니다.")
-            return
-        mesh = o3d.io.read_triangle_mesh("model.stl")
-        mesh.compute_vertex_normals()
-        mesh.paint_uniform_color([0.4, 0.4, 1.0])
-        self._add_geometry(mesh, "stl")
+    # def _add_stl(self):
+    #     if not os.path.exists("model.stl"):
+    #         print("model.stl 파일이 현재 폴더에 없습니다.")
+    #         return
+    #     mesh = o3d.io.read_triangle_mesh("model.stl")
+    #     mesh.compute_vertex_normals()
+    #     mesh.paint_uniform_color([0.4, 0.4, 1.0])
+    #     self._add_geometry(mesh, "stl")
 
-    def _clear_all(self):
-        for name in list(self.geometry_map.keys()):
-            self.scene.scene.remove_geometry(name)
-        self.geometry_map.clear()
-        self.counter = 0
+    # def _clear_all(self):
+    #     for name in list(self.geometry_map.keys()):
+    #         self.scene.scene.remove_geometry(name)
+    #     self.geometry_map.clear()
+    #     self.counter = 0
 
-    def _fit_scene(self):
-        bounds = self.scene.scene.bounding_box
-        self.scene.setup_camera(60, bounds, bounds.get_center())
+    # def _fit_scene(self):
+    #     bounds = self.scene.scene.bounding_box
+    #     self.scene.setup_camera(60, bounds, bounds.get_center())
 
 
 

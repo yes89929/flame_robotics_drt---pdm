@@ -222,7 +222,7 @@ background-color: rgb(255, 100, 100);</string>
     <property name="title">
      <string>3D Viewer Options</string>
     </property>
-    <widget class="QCheckBox" name="chk_show_global_coord">
+    <widget class="QCheckBox" name="chk_show_origin_coord">
      <property name="geometry">
       <rect>
        <x>10</x>
@@ -232,7 +232,7 @@ background-color: rgb(255, 100, 100);</string>
       </rect>
      </property>
      <property name="text">
-      <string>Show Global Coordinates</string>
+      <string>Show Origin Coordinate</string>
      </property>
     </widget>
    </widget>
