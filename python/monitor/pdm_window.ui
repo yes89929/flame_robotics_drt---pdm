@@ -30,11 +30,11 @@
    <string notr="true"/>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <widget class="QPushButton" name="btn_find_tcp_pose">
+   <widget class="QPushButton" name="btn_find_pose">
     <property name="geometry">
      <rect>
       <x>15</x>
-      <y>10</y>
+      <y>340</y>
       <width>211</width>
       <height>31</height>
      </rect>
@@ -52,23 +52,29 @@ background-color: rgb(212, 212, 212);</string>
      <string>Find TCP Pose</string>
     </property>
    </widget>
-  </widget>
-  <widget class="QMenuBar" name="menubar">
-   <property name="geometry">
-    <rect>
-     <x>0</x>
-     <y>0</y>
-     <width>240</width>
-     <height>24</height>
-    </rect>
-   </property>
-   <widget class="QMenu" name="menuControl">
-    <property name="title">
-     <string>File</string>
+   <widget class="QComboBox" name="cbx_pdm_plugins">
+    <property name="geometry">
+     <rect>
+      <x>10</x>
+      <y>35</y>
+      <width>221</width>
+      <height>36</height>
+     </rect>
     </property>
-    <addaction name="actionExit"/>
    </widget>
-   <addaction name="menuControl"/>
+   <widget class="QLabel" name="label">
+    <property name="geometry">
+     <rect>
+      <x>15</x>
+      <y>10</y>
+      <width>211</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Module Selection :</string>
+    </property>
+   </widget>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <action name="actionExit">

@@ -25,10 +25,9 @@ import argparse
 import multiprocessing
 import zmq
 from multiprocessing import Process
-from gui.monitor.main_window import AppWindow as MainWindow
-from gui.monitor.graphic_window import Graphic3DWindow
+from python.monitor.main_window import AppWindow as MainWindow
+from python.monitor.graphic_window import Graphic3DWindow
 from util.logger.console import ConsoleLogger
-
 
 
 if __name__ == "__main__":

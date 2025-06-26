@@ -1,5 +1,5 @@
 '''
-DRT Monitor Application Window class
+DRT Robot Control Module Window
 @Author Byunghun Hwang<bh.hwang@iae.re.kr>
 '''
 
@@ -16,21 +16,24 @@ except ImportError:
 import zmq
 import os, sys
 import pathlib
+import json
+import importlib
+import inspect
 
 from util.logger.console import ConsoleLogger
+from python.base.plugin_rcm_base import PluginRCMBase
 
 
 class AppWindow(QMainWindow):
-    def __init__(self, context:zmq.Context, config:dict):
+    def __init__(self, context:zmq.Context, socket, config:dict):
         """ initialization """
         super().__init__()
         
         self.__console = ConsoleLogger.get_logger() # logger
         self.__config = config  # copy configuration data
 
-        ### configure zmq context
-        n_ctx_value = config.get("n_io_context", 14)
-        self.__pipeline_context = zmq.Context(n_ctx_value) # zmq context
+        # publisher socket
+        self._publisher = socket
 
         try:            
             if "rcm_gui" in config:
@@ -50,6 +53,20 @@ class AppWindow(QMainWindow):
 
     def closeEvent(self, event:QCloseEvent) -> None:
         """ Handle close event """
-        self.__pipeline_context.destroy(0)
         return super().closeEvent(event)
+    
+    def __call(self, function:str, kwargs:dict):
+        topic = "call"
+        message = { "function":function,"kwargs":kwargs}
+        if self._publisher:
+            self._publisher.send_multipart([topic.encode(), json.dumps(message).encode()])
+        else:
+            self.__console.warning(f"Failed send")
+    
+    def __load_rcm_plugins(module_name:str) -> PluginRCMBase:
+        module = importlib.import_module(f"plugin_rcm.{module_name}")
+        for name, obj in inspect.getmembers(module, inspect.isclass):
+            if issubclass(obj, PluginRCMBase) and obj is not PluginRCMBase:
+                return obj()
+        raise Exception("No valid RCM plugin found")
 

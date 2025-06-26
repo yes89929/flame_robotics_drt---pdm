@@ -18,10 +18,10 @@ import os, sys
 import pathlib
 import json
 
-from util.logger.console import ConsoleLogger
-from gui.monitor.pdm_window import AppWindow as PDMWindow
-from gui.monitor.rcm_window import AppWindow as RCMWindow
 
+from util.logger.console import ConsoleLogger
+from python.monitor.pdm_window import AppWindow as PDMWindow
+from python.monitor.rcm_window import AppWindow as RCMWindow
 
 
 class AppWindow(QMainWindow):
@@ -33,14 +33,14 @@ class AppWindow(QMainWindow):
         self.__config = config  # copy configuration data
 
         # publisher
-        self.__socket = context.socket(zmq.PUB)
-        self.__socket.setsockopt(zmq.RCVBUF .RCVHWM, 100)
-        self.__socket.setsockopt(zmq.LINGER, 0)
-        self.__socket.bind("tcp://*:9000")
+        self._socket = context.socket(zmq.PUB)
+        self._socket.setsockopt(zmq.SNDHWM, 100)
+        self._socket.setsockopt(zmq.LINGER, 0)
+        self._socket.bind("tcp://*:9000")
 
         # sub windows
-        self.__pdm_window = PDMWindow(context, config)
-        self.__rcm_window = RCMWindow(context, config)
+        self.__pdm_window = PDMWindow(context, self._socket, config)
+        self.__rcm_window = RCMWindow(context, self._socket, config)
 
         try:            
             if "main_gui" in config:
@@ -71,7 +71,7 @@ class AppWindow(QMainWindow):
             if sub.isVisible():
                 sub.close()
 
-        self.__console.info("Closing main window and destroying zmq context.")
+        self.__console.info("Closing Main Window")
         return super().closeEvent(event)
     
     def on_open_pcd(self):
@@ -100,7 +100,7 @@ class AppWindow(QMainWindow):
 
     def on_select_generate_pcd(self):
         """ 3D Model to PCD file generation """
-        from gui.monitor.util_gen_pcd import AppWindow as GenPCDWindow
+        from python.monitor.util_gen_pcd import AppWindow as GenPCDWindow
         model_file, _ = QFileDialog.getOpenFileName(self, "Open STL File", "", "STL Files (*.stl);;All Files (*)")
         if model_file:
             wnd = GenPCDWindow(config=self.__config, target=model_file)
@@ -111,7 +111,7 @@ class AppWindow(QMainWindow):
     def on_show_origin_coord(self, checked:bool):
         try:
             if checked:
-                self.__call(function="API_add_coord_frame", kwargs={"name":"origin", "size":0.1, "pos":[0.0, 0.0, 0.0]})
+                self.__call(function="API_add_coord_frame", kwargs={"name":"origin", "size":0.3, "pos":[0.0, 0.0, 0.0]})
             else:
                 self.__call(function="API_remove_geometry", kwargs={"name":"origin"})
         except zmq.ZMQError as e:
@@ -122,10 +122,12 @@ class AppWindow(QMainWindow):
     def __call(self, function:str, kwargs:dict):
         topic = "call"
         message = { "function":function,"kwargs":kwargs}
-        if self.__socket:
-            self.__socket.send_multipart([topic.encode(), json.dumps(message).encode()])
+        if self._socket:
+            self._socket.send_multipart([topic.encode(), json.dumps(message).encode()])
         else:
             self.__console.warning(f"Failed send")
+
+    
 
 
         

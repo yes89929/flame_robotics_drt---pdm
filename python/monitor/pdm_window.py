@@ -1,5 +1,5 @@
 '''
-DRT Monitor Application Window class
+DRT Pose Detection Module Window
 @Author Byunghun Hwang<bh.hwang@iae.re.kr>
 '''
 
@@ -16,21 +16,24 @@ except ImportError:
 import zmq
 import os, sys
 import pathlib
+import json
+import importlib
+import inspect
 
 from util.logger.console import ConsoleLogger
+from python.base.plugin_pdm_base import PluginPDMBase
 
 
 class AppWindow(QMainWindow):
-    def __init__(self, context:zmq.Context, config:dict):
+    def __init__(self, context:zmq.Context, socket, config:dict):
         """ initialization """
         super().__init__()
         
         self.__console = ConsoleLogger.get_logger() # logger
         self.__config = config  # copy configuration data
 
-        ### configure zmq context
-        n_ctx_value = config.get("n_io_context", 14)
-        self.__pipeline_context = zmq.Context(n_ctx_value) # zmq context
+        # publisher socket
+        self._publisher = socket
 
         try:            
             if "pdm_gui" in config:
@@ -39,6 +42,12 @@ class AppWindow(QMainWindow):
                     loadUi(ui_path, self)
                     self.setWindowTitle(config.get("pdm_window_title", "Pose Detection View"))
                     self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.CustomizeWindowHint | Qt.WindowType.WindowTitleHint)
+
+                    # module list
+                    for plugin_name in config["pdm_plugins"]:
+                        self.cbx_pdm_plugins.addItem(plugin_name)
+
+                    self.btn_find_pose.clicked.connect(self.on_btn_find_pose)
 
                     self.show()
                 else:
@@ -51,6 +60,18 @@ class AppWindow(QMainWindow):
 
     def closeEvent(self, event:QCloseEvent) -> None:
         """ Handle close event """
-        self.__pipeline_context.destroy(0)
+        self.__console.info("Closing Pose Detection Window")
         return super().closeEvent(event)
+    
+    def on_btn_find_pose(self):
+        selected_plugin = self.cbx_pdm_plugins.currentText()
+        self.__call(function="API_find_pose", kwargs={"plugin":selected_plugin})
+    
+    def __call(self, function:str, kwargs:dict):
+        topic = "call"
+        message = {"function":function, "kwargs":kwargs}
+        if self._publisher:
+            self._publisher.send_multipart([topic.encode(), json.dumps(message).encode()])
+        else:
+            self.__console.warning(f"Failed send")
 

@@ -23,6 +23,11 @@ from util.logger.console import ConsoleLogger
 import zmq
 import json
 import numpy as np
+import importlib
+import inspect
+
+from python.base.plugin_pdm_base import PluginPDMBase
+from python.base.plugin_rcm_base import PluginRCMBase
 
 
 class Graphic3DWindow():
@@ -119,9 +124,10 @@ class Graphic3DWindow():
             import open3d as o3d
 
             # create 3d window
-            _vis = o3d.visualization.Visualizer()
+            _vis = o3d.visualization.VisualizerWithKeyCallback()
             _vis.create_window(window_name='3D Graphic Viewer', width=1920, height=1920, left=50, top=50)
             _vis.get_render_option().background_color = [1.0, 1.0, 1.0]
+            _vis.register_key_callback(ord("A"), Graphic3DWindow.key_press_callback)
 
             while not stop_event.is_set():
                 while not queue.empty():
@@ -138,6 +144,12 @@ class Graphic3DWindow():
         console.debug("[Graphic 3D Window] Render process terminated.")
     
     @staticmethod
+    def key_press_callback(vis):
+        print("(test)key pressed")
+        return False
+        
+    
+    @staticmethod
     def geometry_manage(visualizer:o3d.visualization.Visualizer, msg:dict) -> None:
         try:
             # static function call
@@ -149,28 +161,51 @@ class Graphic3DWindow():
             print(f"[3D Viewer] Exception : {e}")
 
     @staticmethod
+    def _load_pdm_plugin(plugin_name:str) -> PluginPDMBase:
+        module = importlib.import_module(f"plugin_pdm.{plugin_name}")
+        for name, obj in inspect.getmembers(module, inspect.isclass):
+            if issubclass(obj, PluginPDMBase) and obj is not PluginPDMBase:
+                return obj()
+        raise Exception("No valid PDM plugin found")
+
+    @staticmethod
+    def API_find_pose(vis, plugin:str):
+        print(f"Call API_find_pose {plugin}")
+        module = Graphic3DWindow._load_pdm_plugin(plugin)
+        if module:
+            module.find_pose()
+
+    @staticmethod
     def API_add_pcd(vis, name:str, path:str, pos:list=[0,0,0], ori:list=[0,0,0], color:list=[0,0,0]):
+        print(f"Call API_add_pcd")
         obj = o3d.io.read_point_cloud(path)
         if not obj.has_points():
             print(f"[API_add_pcd] PCD has no points")
             return None
         
-        R = obj.get_rotation_matrix_from_axis_angle(axis_angle=ori) # rotation
-        obj.rotate(R, center=(0, 0, 0))
+        R_matrix = obj.get_rotation_matrix_from_axis_angle(rotation=ori) # rotation
+        obj.rotate(R=R_matrix)
         obj.translate(translation=pos, relative=False) # translation
         
         num_points = np.asarray(obj.points).shape[0]
         black_colors = np.tile(color, (num_points, 1))  # shape: (N, 3)
         obj.colors = o3d.utility.Vector3dVector(black_colors)
 
+        # for bbox
+        aabb = obj.get_axis_aligned_bounding_box()
+        aabb.color = (1,0,0)
+
         if not name in Graphic3DWindow._geometry_container.keys():
             Graphic3DWindow._geometry_container[name] = obj
             vis.add_geometry(obj, reset_bounding_box=True)
+            Graphic3DWindow._geometry_container[f"{name}_bbox"] = aabb
+            vis.add_geometry(aabb)
         else:
             print(f"[API_add_pcd] Already added {name} in geomery container")
 
     @staticmethod
     def API_remove_geometry(vis, name:str) -> None:
+        print(f"Call API_remove_geometry")
         if name in Graphic3DWindow._geometry_container.keys():
             vis.remove_geometry(Graphic3DWindow._geometry_container[name])
             del Graphic3DWindow._geometry_container[name]
@@ -180,10 +215,10 @@ class Graphic3DWindow():
     
     @staticmethod
     def API_add_coord_frame(vis, name:str, pos:list=[0,0,0], ori:list=[0,0,0], size:float=0.1) -> None:
+        print(f"Call API_add_coord_frame")
         obj = o3d.geometry.TriangleMesh.create_coordinate_frame(size=size, origin=pos)
-        R = obj.get_rotation_matrix_from_axis_angle(axis_angle=np.array(ori).reshape(3, 1)) # rotation
-        print("rotation matrix:", R)
-        obj.rotate(rotation=R, center=(0, 0, 0))
+        R_matrix = obj.get_rotation_matrix_from_axis_angle(rotation=ori) # rotation
+        obj.rotate(R=R_matrix)
         obj.translate(translation=pos, relative=False)
         if not name in Graphic3DWindow._geometry_container.keys():
             Graphic3DWindow._geometry_container[name] = obj
@@ -193,11 +228,12 @@ class Graphic3DWindow():
 
     @staticmethod
     def API_add_box(vis, name:str, pos:list=[0,0,0], ori:list=[0,0,0], size:list=[1.0, 1.0, 1.0], color:list=[0,0,0]):
+        print(f"Call API_add_box")
         obj = o3d.geometry.TriangleMesh.create_box(width=size[0], height=size[1], depth=size[2])
         obj.compute_vertex_normals()
         obj.paint_uniform_color(color=color)
-        R = obj.get_rotation_matrix_from_axis_angle(axis_angle=ori) # rotation
-        obj.rotate(R, center=(0, 0, 0))
+        R_matrix = obj.get_rotation_matrix_from_axis_angle(rotation=ori) # rotation
+        obj.rotate(R=R_matrix)
         obj.translate(translation=pos, relative=False)
         if not name in Graphic3DWindow._geometry_container.keys():
             Graphic3DWindow._geometry_container[name] = obj
@@ -205,50 +241,7 @@ class Graphic3DWindow():
         else:
             print(f"[api_add_coord_frame] Already added {name} in geomery container")
 
-        # if "function" in msg:
-        #     print(f"{msg}")
-        #     # show origin coord function
-        #     if msg["function"] == "show_origin_coord":
-        #         args = msg["args"]
-        #         if args["show"]:
-        #             print(f"add geometry : {_geometries.keys()}")
-        #             if not "origin_coord" in _geometries.keys():
-        #                 _geometries["origin_coord"] = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
-        #                 _vis.add_geometry(_geometries["origin_coord"], reset_bounding_box=True)
-        #                 # _vis.update_geometry(_geometries["origin_coord"])                                   
 
-        #         else:
-        #             _vis.remove_geometry(_geometries["origin_coord"], reset_bounding_box=False)
-        #             del _geometries["origin_coord"]
-        #             print(f"remove geometry : {_geometries.keys()}")
-
-        #     # open pcd
-        #     elif msg["function"] == "open_pcd":
-        #         args = msg["args"]
-        #         print(f"path : {args['path']}")
-
-    # def add_box(self):
-    #     box = o3d.geometry.TriangleMesh.create_box()
-    #     box.paint_uniform_color([0.2, 0.8, 0.2])
-    #     box.compute_vertex_normals()
-    #     self.geometry_list.append(box)
-    #     self.vis.add_geometry(box)
-
-
-
-    # def _add_geometry(self, geometry, name):
-    #     # 각 지오메트리에 고유한 이름 부여
-    #     key = f"{name}_{self.counter}"
-    #     self.scene.scene.add_geometry(key, geometry, rendering.MaterialRecord())
-    #     self.geometry_map[key] = geometry
-    #     self.counter += 1
-    #     self._fit_scene()
-
-    # def _add_box(self):
-    #     mesh = o3d.geometry.TriangleMesh.create_box(1, 1, 1)
-    #     mesh.paint_uniform_color([0.2, 0.8, 0.2])
-    #     mesh.compute_vertex_normals()
-    #     self._add_geometry(mesh, "box")
 
     # def _add_sphere(self):
     #     mesh = o3d.geometry.TriangleMesh.create_sphere(radius=0.5)
