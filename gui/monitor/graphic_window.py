@@ -15,6 +15,7 @@ except ImportError:
 import open3d.visualization.gui as gui
 import open3d.visualization.rendering as rendering
 import os
+import open3d as o3d
 import time
 import threading
 import multiprocessing
@@ -25,6 +26,10 @@ import numpy as np
 
 
 class Graphic3DWindow():
+    
+    # geometry container to manage the visualizing object
+    _geometry_container = {}
+
     def __init__(self, config:dict):
         super().__init__()
 
@@ -35,7 +40,6 @@ class Graphic3DWindow():
         self._stop_render_event = multiprocessing.Event()
         self._stop_zmq_event = threading.Event()
         self._vis = None
-        self._geometries = []
 
         # manage zmq interface
         self.context = zmq.Context(1)
@@ -90,8 +94,6 @@ class Graphic3DWindow():
 
     def close(self):
         """ close graphic 3d viewer """
-        print("[Graphic 3D Window] Closing Graphic 3D Viewer...")
-
         # terminate process
         self._stop_render_event.set()
         self._render_proc.join(timeout=3)
@@ -109,59 +111,121 @@ class Graphic3DWindow():
         except zmq.ZMQError as e:
             print(f"[Graphic 3D Window] {e}")
 
-    @staticmethod
-    def box(position:list=[0,0,0], orientation=[0,0,0], size:list=[1,1,1], color:list=[1,1,1]):
-        """ (x,y,z), (w,h,d), (r,g,b)"""
-        import open3d as o3d
-        box = o3d.geometry.TriangleMesh.create_box(*size)
-        box.paint_uniform_color(color)
-        box.translate([-0.5, -0.5, -0.5]) # align to center
-        box.compute_vertex_normals()
-        box.translate(position) # translation
-        R = box.get_rotation_matrix_from_axis_angle(orientation) # rotation
-        box.rotate(R, center=(0, 0, 0))
-        return box
-
 
     @staticmethod
     def _render_process(stop_event, queue:multiprocessing.Queue):
         try:
             console = ConsoleLogger.get_logger()
-
             import open3d as o3d
-            _geometries = []
 
+            # create 3d window
             _vis = o3d.visualization.Visualizer()
-            _vis.create_window(window_name='3D Graphic Viewer', width=1920, height=1080, left=50, top=50)
+            _vis.create_window(window_name='3D Graphic Viewer', width=1920, height=1920, left=50, top=50)
             _vis.get_render_option().background_color = [1.0, 1.0, 1.0]
 
-            box = Graphic3DWindow.box(position=[1,0,0], size=[1,1,1], color=[0.2, 0.8, 0.2])
-            print(box)
-
-            # size = [1,0.5,1]
-            # box = o3d.geometry.TriangleMesh.create_box(*size)
-            # box.paint_uniform_color([0.2, 0.8, 0.2])
-            # box.compute_vertex_normals()
-            _vis.add_geometry(box)
-            _geometries.append(box)
-
-            axis = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
-            _vis.add_geometry(axis)
-            _geometries.append(axis)
             while not stop_event.is_set():
                 while not queue.empty():
                     msg = queue.get()
-                    console.debug(f"[Graphic 3D Window] Received message via Pipe : {msg}")
+                    Graphic3DWindow.geometry_manage(_vis, msg) # JSON-style message process interface
                 _vis.poll_events()
                 _vis.update_renderer()
                 time.sleep(0.03)
         except Exception as e:
-            print(f"[Graphic 3D Window] Error in rendering: {e}")
+            console.error(f"[Graphic 3D Window] Error in rendering: {e}")
 
         _vis.destroy_window()
-        _geometries.clear()
+        Graphic3DWindow._geometry_container.clear()
         console.debug("[Graphic 3D Window] Render process terminated.")
+    
+    @staticmethod
+    def geometry_manage(visualizer:o3d.visualization.Visualizer, msg:dict) -> None:
+        try:
+            # static function call
+            function_name = msg["function"]
+            function = getattr(Graphic3DWindow, function_name)
+            kwargs = msg["kwargs"]
+            function(visualizer, **kwargs)
+        except Exception as e:
+            print(f"[3D Viewer] Exception : {e}")
+
+    @staticmethod
+    def API_add_pcd(vis, name:str, path:str, pos:list=[0,0,0], ori:list=[0,0,0], color:list=[0,0,0]):
+        obj = o3d.io.read_point_cloud(path)
+        if not obj.has_points():
+            print(f"[API_add_pcd] PCD has no points")
+            return None
         
+        R = obj.get_rotation_matrix_from_axis_angle(axis_angle=ori) # rotation
+        obj.rotate(R, center=(0, 0, 0))
+        obj.translate(translation=pos, relative=False) # translation
+        
+        num_points = np.asarray(obj.points).shape[0]
+        black_colors = np.tile(color, (num_points, 1))  # shape: (N, 3)
+        obj.colors = o3d.utility.Vector3dVector(black_colors)
+
+        if not name in Graphic3DWindow._geometry_container.keys():
+            Graphic3DWindow._geometry_container[name] = obj
+            vis.add_geometry(obj, reset_bounding_box=True)
+        else:
+            print(f"[API_add_pcd] Already added {name} in geomery container")
+
+    @staticmethod
+    def API_remove_geometry(vis, name:str) -> None:
+        if name in Graphic3DWindow._geometry_container.keys():
+            vis.remove_geometry(Graphic3DWindow._geometry_container[name])
+            del Graphic3DWindow._geometry_container[name]
+        else:
+            print(f"[API_remove_geometry] {name} geometry cannot find in geometry container")
+        
+    
+    @staticmethod
+    def API_add_coord_frame(vis, name:str, pos:list=[0,0,0], ori:list=[0,0,0], size:float=0.1) -> None:
+        obj = o3d.geometry.TriangleMesh.create_coordinate_frame(size=size, origin=pos)
+        R = obj.get_rotation_matrix_from_axis_angle(axis_angle=np.array(ori).reshape(3, 1)) # rotation
+        print("rotation matrix:", R)
+        obj.rotate(rotation=R, center=(0, 0, 0))
+        obj.translate(translation=pos, relative=False)
+        if not name in Graphic3DWindow._geometry_container.keys():
+            Graphic3DWindow._geometry_container[name] = obj
+            vis.add_geometry(obj, reset_bounding_box=True)
+        else:
+            print(f"[api_add_coord_frame] Already added {name} in geomery container")
+
+    @staticmethod
+    def API_add_box(vis, name:str, pos:list=[0,0,0], ori:list=[0,0,0], size:list=[1.0, 1.0, 1.0], color:list=[0,0,0]):
+        obj = o3d.geometry.TriangleMesh.create_box(width=size[0], height=size[1], depth=size[2])
+        obj.compute_vertex_normals()
+        obj.paint_uniform_color(color=color)
+        R = obj.get_rotation_matrix_from_axis_angle(axis_angle=ori) # rotation
+        obj.rotate(R, center=(0, 0, 0))
+        obj.translate(translation=pos, relative=False)
+        if not name in Graphic3DWindow._geometry_container.keys():
+            Graphic3DWindow._geometry_container[name] = obj
+            vis.add_geometry(obj, reset_bounding_box=True)
+        else:
+            print(f"[api_add_coord_frame] Already added {name} in geomery container")
+
+        # if "function" in msg:
+        #     print(f"{msg}")
+        #     # show origin coord function
+        #     if msg["function"] == "show_origin_coord":
+        #         args = msg["args"]
+        #         if args["show"]:
+        #             print(f"add geometry : {_geometries.keys()}")
+        #             if not "origin_coord" in _geometries.keys():
+        #                 _geometries["origin_coord"] = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+        #                 _vis.add_geometry(_geometries["origin_coord"], reset_bounding_box=True)
+        #                 # _vis.update_geometry(_geometries["origin_coord"])                                   
+
+        #         else:
+        #             _vis.remove_geometry(_geometries["origin_coord"], reset_bounding_box=False)
+        #             del _geometries["origin_coord"]
+        #             print(f"remove geometry : {_geometries.keys()}")
+
+        #     # open pcd
+        #     elif msg["function"] == "open_pcd":
+        #         args = msg["args"]
+        #         print(f"path : {args['path']}")
 
     # def add_box(self):
     #     box = o3d.geometry.TriangleMesh.create_box()

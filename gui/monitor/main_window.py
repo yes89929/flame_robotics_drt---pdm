@@ -79,7 +79,13 @@ class AppWindow(QMainWindow):
         pcd_file, _ = QFileDialog.getOpenFileName(self, "Open PCD File", "", "PCD Files (*.pcd);;All Files (*)")
         if pcd_file:
             self.__console.info(f"Selected PCD file: {pcd_file}")
-            self.__pcd_viewer.add_pcd(pcd_file)
+            self.edit_pcd_file.setText(pcd_file)
+            try:
+                self.__call(function="API_add_pcd", kwargs={"name":os.path.basename(pcd_file), "path":pcd_file, "pos":[0.0, 0.0, 0.0]})
+            except zmq.ZMQError as e:
+                self.__console.error(f"[Main Window] {e}")
+            except json.JSONDecodeError as e:
+                self.__console.error(f"[Main Window] JSON Decode Error: {e}")
         else:
             self.__console.warning("No PCD file selected.")
 
@@ -104,16 +110,23 @@ class AppWindow(QMainWindow):
 
     def on_show_origin_coord(self, checked:bool):
         try:
-            topic = "call"
-            message = { "function":"show_origin_coord",
-                "args":{ "show":checked}
-            }
-            jmsg = json.dumps(message)
-            self.__socket.send_multipart([topic.encode(), jmsg.encode()])
+            if checked:
+                self.__call(function="API_add_coord_frame", kwargs={"name":"origin", "size":0.1, "pos":[0.0, 0.0, 0.0]})
+            else:
+                self.__call(function="API_remove_geometry", kwargs={"name":"origin"})
         except zmq.ZMQError as e:
             self.__console.error(f"[Main Window] {e}")
         except json.JSONDecodeError as e:
             self.__console.error(f"[Main Window] JSON Decode Error: {e}")
+
+    def __call(self, function:str, kwargs:dict):
+        topic = "call"
+        message = { "function":function,"kwargs":kwargs}
+        if self.__socket:
+            self.__socket.send_multipart([topic.encode(), json.dumps(message).encode()])
+        else:
+            self.__console.warning(f"Failed send")
+
 
         
 
