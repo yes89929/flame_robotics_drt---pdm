@@ -48,42 +48,47 @@ class Graphic3DWindow():
 
         # manage zmq interface
         self.context = zmq.Context(1)
-        self._socket = self.context.socket(zmq.SUB)
-        self._socket.setsockopt(zmq.RCVBUF .RCVHWM, 100)
-        self._socket.setsockopt(zmq.RCVTIMEO, 500)
-        self._socket.setsockopt(zmq.LINGER, 0)
-        self._socket.connect("tcp://localhost:9000")
-        self._socket.subscribe("call")
+
+        # subscriber
+        self._socket_sub = self.context.socket(zmq.SUB)
+        self._socket_sub.setsockopt(zmq.RCVBUF .RCVHWM, 100)
+        self._socket_sub.setsockopt(zmq.RCVTIMEO, 500)
+        self._socket_sub.setsockopt(zmq.LINGER, 0)
+        self._socket_sub.connect("tcp://localhost:9000")
+        self._socket_sub.subscribe("call")
+
 
         try:
             # [note!!] shared queue must be passed to the multiprocessing process first
-            self._shared_queue = multiprocessing.Queue()
-            self._render_proc = multiprocessing.Process(target=self._render_process, args=(self._stop_render_event, self._shared_queue,), daemon=True)
+            self._msgbox_process = multiprocessing.Queue()
+            self._msgbox_thread = multiprocessing.Queue()
+            self._render_proc = multiprocessing.Process(target=self._render_process, args=(self._stop_render_event, self._msgbox_process,), daemon=True)
             self._render_proc.start()
 
-            self._zmq_pipeline_thread = threading.Thread(target=self.zmq_recv_process, args=(self._stop_zmq_event, self._shared_queue,), daemon=True)
+            self._zmq_pipeline_thread = threading.Thread(target=self.zmq_recv_process, args=(self._stop_zmq_event, self._msgbox_process,), daemon=True)
             self._zmq_pipeline_thread.start()
+
         except Exception as e:
             self.__console.debug("[Graphic 3D Window] Failed to create 3D rendering process")
 
         self.__console.debug("[Graphic 3D Window] Start Graphic 3D Viewer")
 
-    def zmq_recv_process(self, stop_event, queue:multiprocessing.Queue):
+    def zmq_recv_process(self, stop_event, msgbox:multiprocessing.Queue):
         """ zmq pipeline process for receiving data """
 
         poller = zmq.Poller()
-        poller.register(self._socket, zmq.POLLIN)
+        poller.register(self._socket_sub, zmq.POLLIN)
         
         while not stop_event.is_set():
             try:
                 events = dict(poller.poll(1000)) # wait 1 sec
-                if self._socket in events:
-                    if events[self._socket] == zmq.POLLIN:
+                if self._socket_sub in events:
+                    if events[self._socket_sub] == zmq.POLLIN:
                         # for 'call' topic
-                        topic, msg = self._socket.recv_multipart()
+                        topic, msg = self._socket_sub.recv_multipart()
                         if topic.decode() == "call":
                             data = json.loads(msg.decode('utf8').replace("'", '"'))
-                            queue.put(data)  # put data into the shared queue
+                            msgbox.put(data)  # put data into the shared queue
                 
             except json.JSONDecodeError as e:
                 print(f"[Graphic 3D Window] {e}")
@@ -95,7 +100,7 @@ class Graphic3DWindow():
                 print(f"[Graphic 3D Window] {e}")
                 break
 
-        poller.unregister(self._socket)
+        poller.unregister(self._socket_sub)
 
     def close(self):
         """ close graphic 3d viewer """
@@ -108,20 +113,52 @@ class Graphic3DWindow():
         self._zmq_pipeline_thread.join(timeout=3)
 
         try:
-            self._socket.setsockopt(zmq.LINGER, 0)
+            self._socket_sub.setsockopt(zmq.LINGER, 0)
             #self._poller.unregister(self.__socket)
-            self._socket.close()
+            self._socket_sub.close()
 
             self.context.destroy(0)
         except zmq.ZMQError as e:
             print(f"[Graphic 3D Window] {e}")
 
+    @staticmethod
+    def _render_process_gui(stop_event, queue:multiprocessing.Queue):
+        try:
+            gui.Application.instance.initialize()
+            w = gui.Application.instance.create_window("Transparent Box", 1024, 768)
+
+            scene = gui.SceneWidget()
+            scene.scene = rendering.Open3DScene(w.renderer)
+            w.add_child(scene)
+
+            # 박스 생성
+            box = o3d.geometry.TriangleMesh.create_box(width=1, height=1, depth=1)
+            box.compute_vertex_normals()
+
+            # 박스 재질 설정 (투명도 포함)
+            material = rendering.MaterialRecord()
+            material.base_color = [1.0, 0.0, 0.0, 0.5]  # RGBA (0.5 = 50% 투명)
+            material.shader = "defaultLitTransparency"  # 꼭 필요
+
+            scene.scene.add_geometry("box", box, material)
+            scene.setup_camera(60, box.get_axis_aligned_bounding_box(), [0, 0, 0])
+
+        except Exception as e:
+            pass
+
 
     @staticmethod
-    def _render_process(stop_event, queue:multiprocessing.Queue):
+    def _render_process(stop_event, msgbox:multiprocessing.Queue):
         try:
             console = ConsoleLogger.get_logger()
             import open3d as o3d
+            import zmq
+
+            context = zmq.Context(1)
+            socket_pub = context.socket(zmq.PUB)
+            socket_pub.setsockopt(zmq.SNDHWM, 100)
+            socket_pub.setsockopt(zmq.LINGER, 0)
+            socket_pub.bind("tcp://*:9001")
 
             # create 3d window
             _vis = o3d.visualization.VisualizerWithKeyCallback()
@@ -130,9 +167,10 @@ class Graphic3DWindow():
             _vis.register_key_callback(ord("A"), Graphic3DWindow.key_press_callback)
 
             while not stop_event.is_set():
-                while not queue.empty():
-                    msg = queue.get()
+                while not msgbox.empty():
+                    msg = msgbox.get()
                     Graphic3DWindow.geometry_manage(_vis, msg) # JSON-style message process interface
+                    Graphic3DWindow._notify_geometry(socket_pub)
                 _vis.poll_events()
                 _vis.update_renderer()
                 time.sleep(0.03)
@@ -211,7 +249,21 @@ class Graphic3DWindow():
             del Graphic3DWindow._geometry_container[name]
         else:
             print(f"[API_remove_geometry] {name} geometry cannot find in geometry container")
-        
+    
+    @staticmethod
+    def _notify_geometry(socket):
+        print(f"notify")
+        if socket:
+            try:
+                topic = "call"
+                message = {"msg":"test"}
+                if socket:
+                    socket.send_multipart([topic.encode(), json.dumps(message).encode()])
+                    print("send message")
+            except zmq.ZMQError as e:
+                print(f"Notify Error ZMQ : {e}")
+            except json.JSONDecodeError as e:
+                print(f"Notify Error JSON : {e}")        
     
     @staticmethod
     def API_add_coord_frame(vis, name:str, pos:list=[0,0,0], ori:list=[0,0,0], size:float=0.1) -> None:
@@ -239,7 +291,35 @@ class Graphic3DWindow():
             Graphic3DWindow._geometry_container[name] = obj
             vis.add_geometry(obj, reset_bounding_box=True)
         else:
-            print(f"[api_add_coord_frame] Already added {name} in geomery container")
+            print(f"[API_add_box] Already added {name} in geomery container")
+
+    @staticmethod
+    def API_add_floor(vis, name:str, pos:list=[0,0,0], ori:list=[0,0,0], size:list=[1.0,1.0,1.0], color:list=[0,0,0]):
+        print(f"Call API_add_floor")
+        obj = o3d.geometry.TriangleMesh.create_box(width=size[0], height=size[1], depth=size[2])
+        obj.compute_vertex_normals()
+        R_matrix = obj.get_rotation_matrix_from_axis_angle(rotation=ori) # rotation
+        obj.rotate(R=R_matrix)
+        obj.translate(translation=pos, relative=False)
+        Graphic3DWindow._add_geometry(vis, name, obj)
+
+    @staticmethod
+    def API_clear_geometry_all(vis):
+        print(f"Call API_clear_geometry_all")
+        for name in Graphic3DWindow._geometry_container.keys():
+            vis.remove_geometry(Graphic3DWindow._geometry_container[name])
+            print(f"Remove Geometry : {name}")
+        Graphic3DWindow._geometry_container.clear()
+        
+    @staticmethod
+    def _add_geometry(vis, name:str, obj):
+        if not name in Graphic3DWindow._geometry_container.keys():
+            Graphic3DWindow._geometry_container[name] = obj
+            vis.add_geometry(obj, reset_bounding_box=True)
+        else:
+            print(f"[API] Already added {name} in geomery container")
+
+
 
 
 

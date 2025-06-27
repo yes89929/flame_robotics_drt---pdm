@@ -33,14 +33,23 @@ class AppWindow(QMainWindow):
         self.__config = config  # copy configuration data
 
         # publisher
-        self._socket = context.socket(zmq.PUB)
-        self._socket.setsockopt(zmq.SNDHWM, 100)
-        self._socket.setsockopt(zmq.LINGER, 0)
-        self._socket.bind("tcp://*:9000")
+        self._socket_pub = context.socket(zmq.PUB)
+        self._socket_pub.setsockopt(zmq.SNDHWM, 100)
+        self._socket_pub.setsockopt(zmq.LINGER, 0)
+        self._socket_pub.bind("tcp://*:9000")
+
+        # subscriber
+        self._socket_sub = context.socket(zmq.SUB)
+        self._socket_sub.setsockopt(zmq.RCVBUF .RCVHWM, 100)
+        self._socket_sub.setsockopt(zmq.RCVTIMEO, 500)
+        self._socket_sub.setsockopt(zmq.LINGER, 0)
+        self._socket_sub.connect("tcp://localhost:9001")
+        self._socket_sub.subscribe("call")
+
 
         # sub windows
-        self.__pdm_window = PDMWindow(context, self._socket, config)
-        self.__rcm_window = RCMWindow(context, self._socket, config)
+        self.__pdm_window = PDMWindow(context, self._socket_pub, config)
+        self.__rcm_window = RCMWindow(context, self._socket_pub, config)
 
         try:            
             if "main_gui" in config:
@@ -57,6 +66,10 @@ class AppWindow(QMainWindow):
                     self.btn_open_pcd.clicked.connect(self.on_open_pcd)
                     self.btn_open_markers.clicked.connect(self.on_open_markers)
                     self.chk_show_origin_coord.toggled.connect(self.on_show_origin_coord)
+                    self.chk_show_floor_plane.toggled.connect(self.on_show_floor_plane)
+                    self.btn_update_geometry.clicked.connect(self.on_update_geometry)
+                    self.btn_clear_all_geometry.clicked.connect(self.on_clear_geometry_all)
+                    self.config_geometry_tableview()
 
                 else:
                     raise Exception(f"Cannot found UI file : {ui_path}")
@@ -64,6 +77,12 @@ class AppWindow(QMainWindow):
         except Exception as e:
             self.__console.error(f"{e}")
 
+    def config_geometry_tableview(self):
+        self.table_geometry_columns = ["Name", "X", "Y", "Z", "R", "P", "Y"]
+        self.geometry_model = QStandardItemModel()
+        self.geometry_model.setColumnCount(len(self.table_geometry_columns))
+        self.geometry_model.setHorizontalHeaderLabels(self.table_geometry_columns)
+        self.table_geometry.setModel(self.geometry_model)
 
     def closeEvent(self, event:QCloseEvent) -> None:
         """ Handle close event """
@@ -80,12 +99,7 @@ class AppWindow(QMainWindow):
         if pcd_file:
             self.__console.info(f"Selected PCD file: {pcd_file}")
             self.edit_pcd_file.setText(pcd_file)
-            try:
-                self.__call(function="API_add_pcd", kwargs={"name":os.path.basename(pcd_file), "path":pcd_file, "pos":[0.0, 0.0, 0.0]})
-            except zmq.ZMQError as e:
-                self.__console.error(f"[Main Window] {e}")
-            except json.JSONDecodeError as e:
-                self.__console.error(f"[Main Window] JSON Decode Error: {e}")
+            self.__call(socket=self._socket_pub, function="API_add_pcd", kwargs={"name":os.path.basename(pcd_file), "path":pcd_file, "pos":[0.0, 0.0, 0.0]})
         else:
             self.__console.warning("No PCD file selected.")
 
@@ -109,23 +123,38 @@ class AppWindow(QMainWindow):
             self.__console.info(f"Selected 3D model file: {model_file}")
 
     def on_show_origin_coord(self, checked:bool):
+        if checked:
+            self.__call(socket=self._socket_pub, function="API_add_coord_frame", kwargs={"name":"origin", "size":0.3, "pos":[0.0, 0.0, 0.0]})
+        else:
+            self.__call(socket=self._socket_pub, function="API_remove_geometry", kwargs={"name":"origin"})
+
+    def on_show_floor_plane(self, checked:bool):
+        if checked:
+            self.__call(socket=self._socket_pub, function="API_add_floor", kwargs={"name":"floor", "size":[40.0, 70.0, 0.005], "pos":[0.1, 0.0, 0.0]})
+        else:
+            self.__call(socket=self._socket_pub, function="API_remove_geometry", kwargs={"name":"floor"})
+    
+    def on_update_geometry(self):
+        pass
+
+    def on_clear_geometry_all(self):
+        self.__call(socket=self._socket_pub, function="API_clear_geometry_all", kwargs={})
+        self.geometry_model.setRowCount(0) # clear table
+        #self.scenario_model.appendRow([QStandardItem(str(data["time"])), QStandardItem(event["mapi"]), QStandardItem(event["message"])])
+        self.table_geometry.resizeColumnsToContents()
+        
+    def __call(self, socket, function:str, kwargs:dict):
         try:
-            if checked:
-                self.__call(function="API_add_coord_frame", kwargs={"name":"origin", "size":0.3, "pos":[0.0, 0.0, 0.0]})
+            topic = "call"
+            message = { "function":function,"kwargs":kwargs}
+            if socket:
+                socket.send_multipart([topic.encode(), json.dumps(message).encode()])
             else:
-                self.__call(function="API_remove_geometry", kwargs={"name":"origin"})
+                self.__console.warning(f"Failed send")
         except zmq.ZMQError as e:
             self.__console.error(f"[Main Window] {e}")
         except json.JSONDecodeError as e:
             self.__console.error(f"[Main Window] JSON Decode Error: {e}")
-
-    def __call(self, function:str, kwargs:dict):
-        topic = "call"
-        message = { "function":function,"kwargs":kwargs}
-        if self._socket:
-            self._socket.send_multipart([topic.encode(), json.dumps(message).encode()])
-        else:
-            self.__console.warning(f"Failed send")
 
     
 

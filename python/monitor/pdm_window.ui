@@ -7,7 +7,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>240</width>
+    <width>290</width>
     <height>467</height>
    </rect>
   </property>
@@ -33,9 +33,9 @@
    <widget class="QPushButton" name="btn_find_pose">
     <property name="geometry">
      <rect>
-      <x>15</x>
-      <y>340</y>
-      <width>211</width>
+      <x>150</x>
+      <y>405</y>
+      <width>126</width>
       <height>31</height>
      </rect>
     </property>
@@ -56,8 +56,8 @@ background-color: rgb(212, 212, 212);</string>
     <property name="geometry">
      <rect>
       <x>10</x>
-      <y>35</y>
-      <width>221</width>
+      <y>30</y>
+      <width>271</width>
       <height>36</height>
      </rect>
     </property>
@@ -72,7 +72,69 @@ background-color: rgb(212, 212, 212);</string>
      </rect>
     </property>
     <property name="text">
-     <string>Module Selection :</string>
+     <string>Choose Algorithm Module :</string>
+    </property>
+   </widget>
+   <widget class="QGroupBox" name="groupBox">
+    <property name="geometry">
+     <rect>
+      <x>10</x>
+      <y>300</y>
+      <width>266</width>
+      <height>96</height>
+     </rect>
+    </property>
+    <property name="title">
+     <string>Options</string>
+    </property>
+    <widget class="QCheckBox" name="chk_endeffector_collision_check">
+     <property name="geometry">
+      <rect>
+       <x>15</x>
+       <y>30</y>
+       <width>236</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>End-Effector Collision Check</string>
+     </property>
+    </widget>
+    <widget class="QCheckBox" name="chk_show_detected_pose_coord">
+     <property name="geometry">
+      <rect>
+       <x>15</x>
+       <y>60</y>
+       <width>236</width>
+       <height>21</height>
+      </rect>
+     </property>
+     <property name="text">
+      <string>Show Detected Pose Coord.</string>
+     </property>
+    </widget>
+   </widget>
+   <widget class="QLabel" name="label_2">
+    <property name="geometry">
+     <rect>
+      <x>15</x>
+      <y>70</y>
+      <width>211</width>
+      <height>21</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>E/E Configuration :</string>
+    </property>
+   </widget>
+   <widget class="QComboBox" name="cbx_endeffector_config">
+    <property name="geometry">
+     <rect>
+      <x>10</x>
+      <y>90</y>
+      <width>271</width>
+      <height>36</height>
+     </rect>
     </property>
    </widget>
   </widget>
