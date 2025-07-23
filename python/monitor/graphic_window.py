@@ -51,7 +51,7 @@ class Graphic3DWindow():
 
         # subscriber
         self._socket_sub = self.context.socket(zmq.SUB)
-        self._socket_sub.setsockopt(zmq.RCVBUF .RCVHWM, 100)
+        self._socket_sub.setsockopt(zmq.RCVHWM, 100)
         self._socket_sub.setsockopt(zmq.RCVTIMEO, 500)
         self._socket_sub.setsockopt(zmq.LINGER, 0)
         self._socket_sub.connect("tcp://localhost:9000")
@@ -89,6 +89,7 @@ class Graphic3DWindow():
                         if topic.decode() == "call":
                             data = json.loads(msg.decode('utf8').replace("'", '"'))
                             msgbox.put(data)  # put data into the shared queue
+                print(events)
                 
             except json.JSONDecodeError as e:
                 print(f"[Graphic 3D Window] {e}")
@@ -173,7 +174,7 @@ class Graphic3DWindow():
                     Graphic3DWindow._notify_geometry(socket_pub)
                 _vis.poll_events()
                 _vis.update_renderer()
-                time.sleep(0.03)
+                time.sleep(0.01)
         except Exception as e:
             console.error(f"[Graphic 3D Window] Error in rendering: {e}")
 
@@ -228,6 +229,7 @@ class Graphic3DWindow():
         num_points = np.asarray(obj.points).shape[0]
         black_colors = np.tile(color, (num_points, 1))  # shape: (N, 3)
         obj.colors = o3d.utility.Vector3dVector(black_colors)
+        obj.point_size = 1.0
 
         # for bbox
         aabb = obj.get_axis_aligned_bounding_box()
@@ -252,7 +254,6 @@ class Graphic3DWindow():
     
     @staticmethod
     def _notify_geometry(socket):
-        print(f"notify")
         if socket:
             try:
                 topic = "call"

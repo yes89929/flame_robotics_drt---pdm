@@ -1,19 +1,22 @@
 # flame_robotics_drt
 
-## Note
-1. ROS2를 사용하지 않음.
-
 ## Setup
 
-## Launch
-* Run Flame Middleware
+## Setup Environments (Python 3.10)
+
+1. Install python prerequisites
 ```
-$ sudo ./flame --config drt.conf
-```
-* Setup Python virtual environment
+$ pip install -r requirements.txt
 ```
 
+2. Run 3D Viewer
+```
+(venv)$ cd python
+(venv)$ python viewer3d.py --config viewer3d.cfg
 ```
 
-## References
-1. GPD (Grasp Pose Detection), https://github.com/atenpas/gpd
+3. Test URDF Parser
+```
+(venv)$ cd python/tests
+(venv)$ python test_urdf.py
+```

@@ -1,5 +1,5 @@
 '''
-DRT Monitor Application Window class
+DRT User Control App.
 @Author Byunghun Hwang<bh.hwang@iae.re.kr>
 '''
 

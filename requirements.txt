@@ -5,3 +5,8 @@ pyzmq
 open3d
 trimesh
 numpy
+shapely
+mapbox_earcut
+lxml
+networkx
+pycollada
