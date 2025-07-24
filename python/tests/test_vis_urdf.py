@@ -10,12 +10,14 @@ import trimesh
 # 1. URDF 파싱
 urdf_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../urdf/robots")
 print(urdf_dir)
-robot = URDF.load(os.path.join(urdf_dir, "rb10_1300e.urdf"))
+robot = URDF.load(os.path.join(urdf_dir, "ur5.urdf"))
+link_poses = robot.link_fk()
 
 # 2. 모든 링크 순회
 o3d_meshes = []
 for link in robot.links:
     print(f"Link: {link.name}")
+    link_world_T = link_poses[link]
     for visual in link.visuals:
         if not hasattr(visual.geometry, "mesh") or visual.geometry.mesh is None:
             continue
@@ -27,20 +29,17 @@ for link in robot.links:
 
         # 3. Open3D로 메쉬 로드
         mesh = trimesh.load(mesh_filename)
-        if isinstance(mesh, trimesh.Scene):
-            geoms = mesh.geometry.values()
-        else:
-            geoms = [mesh]
+        geoms = mesh.geometry.values() if isinstance(mesh, trimesh.Scene) else [mesh]
 
         for geom in geoms:
             o3d_mesh = o3d.geometry.TriangleMesh()
             o3d_mesh.vertices = o3d.utility.Vector3dVector(geom.vertices)
             o3d_mesh.triangles = o3d.utility.Vector3iVector(geom.faces)
             o3d_mesh.compute_vertex_normals()
-            # o3d_meshes.append(o3d_mesh)
-            print(f"{mesh_filename}")
             
-            o3d_mesh.transform(visual.origin)
+            visual_T = visual.origin
+            T = link_world_T @ visual_T
+            o3d_mesh.transform(T)
             o3d_meshes.append(o3d_mesh)
 
 # 5. 시각화
