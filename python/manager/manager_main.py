@@ -1,5 +1,5 @@
 '''
-DRT User Control App.
+DRT Monitor Application Window class
 @Author Byunghun Hwang<bh.hwang@iae.re.kr>
 '''
 
@@ -22,7 +22,7 @@ import threading
 
 from util.logger.console import ConsoleLogger
 from python.manager.pdm_window import AppWindow as PDMWindow
-from python.manager.rcm_window import AppWindow as RCMWindow
+# from python.manager.rcm_window import AppWindow as RCMWindow
 
 
 class AppWindow(QMainWindow):
@@ -53,7 +53,7 @@ class AppWindow(QMainWindow):
 
         # sub windows
         self.__pdm_window = PDMWindow(context, self._socket_pub, config)
-        self.__rcm_window = RCMWindow(context, self._socket_pub, config)
+        # self.__rcm_window = RCMWindow(context, self._socket_pub, config)
 
         try:            
             if "main_gui" in config:
@@ -63,17 +63,14 @@ class AppWindow(QMainWindow):
 
                     self.setWindowTitle(config.get("main_window_title", "DRT Control Simulation Window"))
 
-                    # actions
+                    # menu actions
                     self.actionUtilGeneratePCD.triggered.connect(self.on_select_generate_pcd)
 
                     # interface components callbacks
                     self.btn_open_pcd.clicked.connect(self.on_open_pcd)
-                    self.btn_open_markers.clicked.connect(self.on_open_markers)
-                    self.chk_show_origin_coord.toggled.connect(self.on_show_origin_coord)
-                    self.chk_show_floor_plane.toggled.connect(self.on_show_floor_plane)
-                    self.btn_update_geometry.clicked.connect(self.on_update_geometry)
-                    self.btn_clear_all_geometry.clicked.connect(self.on_clear_geometry_all)
-                    self.config_geometry_tableview()
+                    self.btn_run_simulation.clicked.connect(self.on_run_simulation)
+                    self.btn_stop_simulation.clicked.connect(self.on_stop_simulation)
+                    self.btn_clear_all_geometry.clicked.connect(self.on_clear_all_geometry)
 
                 else:
                     raise Exception(f"Cannot found UI file : {ui_path}")
@@ -110,16 +107,9 @@ class AppWindow(QMainWindow):
 
         poller.unregister(self._socket_sub)
 
-    def config_geometry_tableview(self):
-        self.table_geometry_columns = ["Name", "X", "Y", "Z", "R", "P", "Y"]
-        self.geometry_model = QStandardItemModel()
-        self.geometry_model.setColumnCount(len(self.table_geometry_columns))
-        self.geometry_model.setHorizontalHeaderLabels(self.table_geometry_columns)
-        self.table_geometry.setModel(self.geometry_model)
-
     def closeEvent(self, event:QCloseEvent) -> None:
         """ Handle close event """
-        for sub in [self.__pdm_window, self.__rcm_window]:
+        for sub in [self.__pdm_window]:
             if sub.isVisible():
                 sub.close()
 
@@ -146,14 +136,19 @@ class AppWindow(QMainWindow):
         else:
             self.__console.warning("No PCD file selected.")
 
-    def on_open_markers(self):
-        """ Open Markers file dialog """
-        markers_file, _ = QFileDialog.getOpenFileName(self, "Open Markers File", "", "Markers Files (*.markers);;All Files (*)")
-        if markers_file:
-            self.__console.info(f"Selected Markers file: {markers_file}")
-            # Here you can add code to handle the selected Markers file
-        else:
-            self.__console.warning("No Markers file selected.")
+    def on_run_simulation(self):
+        """ Run Simulation """
+        self.__console.info(f"({self.__class__.__name__}) Running Simulation")
+        
+
+    def on_stop_simulation(self):
+        """ Stop Simulation """
+        self.__console.info(f"({self.__class__.__name__}) Stop Simulation")
+
+    def on_clear_all_geometry(self):
+        """ Clear all geometry """
+        self.__console.info(f"({self.__class__.__name__}) Clear all geometry")
+        self.__call(socket=self._socket_pub, function="API_clear_all_geometry", kwargs={})
 
     def on_select_generate_pcd(self):
         """ 3D Model to PCD file generation """
@@ -164,31 +159,6 @@ class AppWindow(QMainWindow):
             wnd.show()
 
             self.__console.info(f"Selected 3D model file: {model_file}")
-
-    def on_show_origin_coord(self, checked:bool):
-        if checked:
-            self.__call(socket=self._socket_pub, function="API_add_coord_frame", kwargs={"name":"origin", "size":0.5, "pos":[0.0, 0.0, 0.0], "ori":[0.0, 0.0, 0.0]})
-            data = ["origin", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-            self.geometry_model.appendRow([QStandardItem(str(value)) for value in data])
-            #self.geometry_model.appendRow([QStandardItem("origin"), QStandardItem(0), QStandardItem(0), QStandardItem(0), QStandardItem(0), QStandardItem(0), QStandardItem(0)])
-            # self.table_geometry.resizeColumnsToContents()
-        else:
-            self.__call(socket=self._socket_pub, function="API_remove_geometry", kwargs={"name":"origin"})
-
-    def on_show_floor_plane(self, checked:bool):
-        if checked:
-            self.__call(socket=self._socket_pub, function="API_add_floor", kwargs={"name":"floor", "size":[40.0, 70.0, 0.005], "pos":[0.1, 0.0, 0.0]})
-        else:
-            self.__call(socket=self._socket_pub, function="API_remove_geometry", kwargs={"name":"floor"})
-    
-    def on_update_geometry(self):
-        pass
-
-    def on_clear_geometry_all(self):
-        self.__call(socket=self._socket_pub, function="API_clear_geometry_all", kwargs={})
-        self.geometry_model.setRowCount(0) # clear table
-        #self.scenario_model.appendRow([QStandardItem(str(data["time"])), QStandardItem(event["mapi"]), QStandardItem(event["message"])])
-        self.table_geometry.resizeColumnsToContents()
         
     def __call(self, socket, function:str, kwargs:dict):
         try:

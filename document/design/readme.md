@@ -1,1 +1,0 @@
-# Design-related Requirement Specifications
