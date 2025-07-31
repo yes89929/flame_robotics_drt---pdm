@@ -25,7 +25,7 @@ import argparse
 import multiprocessing
 import zmq
 from multiprocessing import Process
-from python.manager.manager_main import AppWindow as MainWindow
+from python.manager.manager import AppWindow as MainWindow
 from util.logger.console import ConsoleLogger
 
 
