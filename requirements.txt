@@ -10,3 +10,4 @@ mapbox_earcut
 lxml
 networkx
 pycollada
+pykin
