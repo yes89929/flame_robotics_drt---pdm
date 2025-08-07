@@ -54,20 +54,21 @@ if __name__ == "__main__":
 
             # zmq pipeline
             n_ctx_value = configure.get("n_io_context", configure.get("n_io_context", 10))
-            zmq_pipeline_context = zmq.Context(n_ctx_value)
+            pipeline_context = zmq.Context(n_ctx_value)
 
             app = QApplication(sys.argv)
             font_id = QFontDatabase.addApplicationFont((ROOT_PATH / configure['font_path']).as_posix())
             font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
             app.setFont(QFont(font_family, 12))
-            main_window = MainWindow(zmq_pipeline_context, config=configure)
+            main_window = MainWindow(pipeline_context, config=configure)
             main_window.show()
 
-            sys.exit(app.exec())
+            exit_cdoe = app.exec()
 
-            # terminate
-            zmq_pipeline_context.destroy(0)
+            # terminate pipeline
+            pipeline_context.term()
             console.info("Application successfully terminated.")
+            sys.exit(exit_cdoe)
 
     except json.JSONDecodeError as e:
         console.critical(f"Configuration File Parse Exception : {e}")

@@ -21,7 +21,10 @@ import threading
 
 
 from util.logger.console import ConsoleLogger
-from python.manager.pdm_window import AppWindow as PDMWindow
+from common.pipeline import Publisher as Pub
+from common.pipeline import Subscriber as Sub
+
+# from python.manager.pdm_window import AppWindow as PDMWindow
 # from python.manager.rcm_window import AppWindow as RCMWindow
 
 
@@ -32,6 +35,9 @@ class AppWindow(QMainWindow):
         
         self.__console = ConsoleLogger.get_logger() # logger
         self.__config = config  # copy configuration data
+
+        self.publisher = Pub(context=context)
+        self.subscriber = Sub(context=context)
 
         # publisher
         self._socket_pub = context.socket(zmq.PUB)
@@ -52,7 +58,7 @@ class AppWindow(QMainWindow):
         self._zmq_pipeline_thread.start()
 
         # sub windows
-        self.__pdm_window = PDMWindow(context, self._socket_pub, config)
+        # self.__pdm_window = PDMWindow(context, self._socket_pub, config)
         # self.__rcm_window = RCMWindow(context, self._socket_pub, config)
 
         try:            
@@ -107,11 +113,9 @@ class AppWindow(QMainWindow):
 
         poller.unregister(self._socket_sub)
 
+    
     def closeEvent(self, event:QCloseEvent) -> None:
         """ Handle close event """
-        for sub in [self.__pdm_window]:
-            if sub.isVisible():
-                sub.close()
 
         # zmq pipeline terminate
         self._stop_zmq_event.set()
@@ -123,7 +127,7 @@ class AppWindow(QMainWindow):
         except zmq.ZMQError as e:
             print(f"[Graphic 3D Window] {e}")
 
-        self.__console.info("Closing Main Window")
+        self.__console.info("Successfully Closed")
         return super().closeEvent(event)
     
     def on_open_pcd(self):

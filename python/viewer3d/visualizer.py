@@ -11,10 +11,14 @@ import zmq
 import json
 import numpy as np
 import threading
+# from pykin.robots.robot import Robot
 
 from util.logger.console import ConsoleLogger
-# from dep.urdf_parser import URDF
-from .geomerty import GeometryAPI
+from urdf_parser import URDF
+from viewer3d.geomerty import GeometryAPI
+from math import pi, cos, sin
+from pytransform3d import rotations, transformations
+import math
 
 class Open3DVisualizer(GeometryAPI):
     _geometry_container = {}
@@ -22,23 +26,39 @@ class Open3DVisualizer(GeometryAPI):
     def __init__(self, config:dict, pipe_context:zmq.Context):
         super().__init__()
 
+        # initialize
         self.__config = config
         self.__console = ConsoleLogger.get_logger() # logger
+        gui.Application.instance.initialize() # gui
 
-        # visualizer
-        gui.Application.instance.initialize() # gui initialize
-        self._window = gui.Application.instance.create_window(title=config["main_window_title"], 
-                                width=self.__config.get("main_gui_window_size", [1280, 720])[0],
-                                height=self.__config.get("main_gui_window_size", [1280, 720])[1])
+        # create window
+        self._window = gui.Application.instance.create_window(title=config["window_title"], 
+                                width=self.__config.get("window_size", [1280, 720])[0],
+                                height=self.__config.get("window_size", [1280, 720])[1])
         self._scene = gui.SceneWidget()
         self._scene.scene = rendering.Open3DScene(self._window.renderer)
-        self._scene.scene.set_background(self.__config.get("main_gui_bgcolor", [1.0, 1.0, 1.0, 1.0])) # RGBA
+        self._scene.scene.set_background(self.__config.get("background-color", [1.0, 1.0, 1.0, 1.0])) # RGBA
         self._scene.scene.scene.set_sun_light([-1, -1, -1], [1, 1, 1], 100000)
-        self._scene.scene.scene.enable_sun_light(True)
+        self._scene.scene.scene.enable_sun_light(True)        
 
-        bbox = o3d.geometry.AxisAlignedBoundingBox([-10, -10, -10], [10, 10, 10])
-        self._scene.setup_camera(60, bbox, [0,0,0])
+        # camera parameter
+        intrinsics = o3d.camera.PinholeCameraIntrinsic(640, 480, 525, 525, 320, 240)
+        extrinsic = np.eye(4)
+        extrinsic[:3, :3] = rotations.active_matrix_from_extrinsic_euler_xyz([math.radians(90), 0, 0])
+        extrinsic[0:3, 3] = [-2.5, 1.0, 4.0]
+
+        initial_viewarea = o3d.geometry.AxisAlignedBoundingBox([-3, -3, -3], [3, 3, 3])
+        self._scene.setup_camera(intrinsics, extrinsic, initial_viewarea)
+        # self._scene.setup_camera(60, initial_viewarea, [0,0,0])
         self._window.add_child(self._scene)
+
+        # initial geometry show
+        self.__show_origin_coord = self.__config.get("show_origin", False)
+        self.on_show_origin_coord()
+        self.__show_robot = self.__config.get("show_robot", False)
+        self.on_show_urdf()
+        self.__show_floor = self.__config.get("show_floor", False)
+        self.on_show_floor()
 
         # close event
         self._window.set_on_close(self.close)
@@ -119,6 +139,7 @@ class Open3DVisualizer(GeometryAPI):
     def on_key_event(self, event):
         """ key event"""
         if event.type == gui.KeyEvent.DOWN and event.key == gui.KeyName.O:
+           self.__show_origin_coord = not self.__show_origin_coord
            self.on_show_origin_coord()
            return True
         elif event.type == gui.KeyEvent.DOWN and event.key == gui.KeyName.U:
@@ -131,17 +152,76 @@ class Open3DVisualizer(GeometryAPI):
 
     def on_show_origin_coord(self):
         """ Show origin coordinate """
-        if not self.__show_origin_coord:
-            frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
+        if self.__show_origin_coord:
+            frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
             material = rendering.MaterialRecord()
             material.shader = "defaultLit"
             self._scene.scene.add_geometry("origin_frame", frame, material)
         else:
             self._scene.scene.remove_geometry("origin_frame")
 
-        self.__show_origin_coord = not self.__show_origin_coord
-
     def on_show_urdf(self):
+        """ show robot URDF model"""
+        if self.__show_robot:
+            for urdf in self.__config["urdf"]:
+                name = urdf["name"]
+                urdf_file = os.path.join(self.__config["root_path"], urdf["path"])
+                self.__console.debug(f"Loading URDF {name} from {urdf_file}")
+
+                robot = URDF.load(urdf_file, lazy_load_meshes=False)
+                base_pos = np.eye(4)
+                base_pos[:3, 3] = np.array(urdf.get("base", [0.0, 0.0, 0.0]))
+                fk = robot.visual_trimesh_fk(cfg=None)
+
+                meshes = []
+                a = 1
+                for tm, T in fk.items():
+                    
+                    tm_copy = tm.copy()
+                    tm_copy.apply_transform(T@base_pos)
+
+                    # convert trimesh to Open3D mesh
+                    o3d_mesh = o3d.geometry.TriangleMesh()
+                    o3d_mesh.vertices = o3d.utility.Vector3dVector(tm_copy.vertices)
+                    o3d_mesh.triangles = o3d.utility.Vector3iVector(tm_copy.faces)
+                    o3d_mesh.compute_vertex_normals()
+
+                    
+                    material = rendering.MaterialRecord()
+                    material.shader = "defaultLit"
+                    #material.base_color = [1, 0, 0, 1]  # RGBA
+
+                    self._scene.scene.add_geometry(f"{name}_{a}", o3d_mesh, material)
+                    a = a+1
+        else:
+            pass
+
+    def on_show_floor(self):
+        if self.__show_floor:
+            width = 5.0   # x축 방향 길이
+            depth = 5.0   # y축 방향 길이
+            height = 0.01  # 두께 (z축 방향), 너무 얇게 설정
+
+            # Open3D 박스 생성 (box는 x, y, z 방향 크기)
+            floor = o3d.geometry.TriangleMesh.create_box(width, depth, height)
+
+            # 기본 생성 시, 박스의 한 꼭지점이 원점 (0,0,0)에 위치함
+            # 따라서 바닥면을 XY 평면(z=0)에 맞추려면 z방향으로 살짝 이동시킴
+            floor.translate((0, 0, -height))
+
+            # 바닥면 색깔 설정 (회색 계열)
+            floor.paint_uniform_color([0.7, 0.7, 0.7])
+
+            material = rendering.MaterialRecord()
+            material.shader = "defaultLit"
+            self._scene.scene.add_geometry("floor", floor, material)
+
+        else:
+            self._scene.scene.remove_geometry("floor")
+
+
+
+    def on_show_urdf2(self):
         """ Show URDF model """
         if "urdf" in self.__config:
             for urdf in self.__config["urdf"]:

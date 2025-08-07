@@ -44,14 +44,14 @@ if __name__ == "__main__":
 
             # zmq pipeline
             n_ctx_value = configure.get("n_io_context", configure.get("n_io_context", 10))
-            zmq_pipeline_context = zmq.Context(n_ctx_value)
+            pipeline_context = zmq.Context(n_ctx_value)
 
             # viewer (using open3d)
-            viewer = Open3DVisualizer(config=configure, pipe_context=zmq_pipeline_context)
+            viewer = Open3DVisualizer(config=configure, pipe_context=pipeline_context)
             viewer.run()
 
             # terminate pipeline context
-            zmq_pipeline_context.term()
+            pipeline_context.term()
             console.info(f"Successfully terminated")
 
     except json.JSONDecodeError as e:
