@@ -9,14 +9,15 @@
 $ pip install -r requirements.txt
 ```
 
-2. Run 3D Viewer
+2. Launch 3D Viewer
 ```
+$ python -m venv venv
+$ source ./venv/bin/activate
 (venv)$ cd python
-(venv)$ python viewer3d.py --config viewer3d.cfg
+(venv)$ python viewer3d.py
 ```
 
-3. Test URDF Parser
+3. Launch Simulation Manager
 ```
-(venv)$ cd python/tests
-(venv)$ python test_urdf.py
+(venv)$ python manager.py
 ```
