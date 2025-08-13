@@ -4,7 +4,10 @@ import open3d.visualization.rendering as rendering
 import numpy as np
 from util.logger.console import ConsoleLogger
 
-class GeometryAPI:
+console = ConsoleLogger.get_logger() # logger
+
+
+class geometryAPI:
     def __init__(self):
         self.__console = ConsoleLogger.get_logger() # logger
         self.__geometry_container = {}

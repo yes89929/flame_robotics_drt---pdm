@@ -22,12 +22,12 @@ sys.path.append(ROOT_PATH.as_posix())
 
 if __name__ == "__main__":
 
+    console = ConsoleLogger.get_logger(level="DEBUG")
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', nargs='?', required=False, help="Configuration File(*.cfg)", default="viewer3d.cfg")
     parser.add_argument('--verbose_level', nargs='?', required=False, help="Set Verbose Level", default="DEBUG")
     args = parser.parse_args()
-
-    console = ConsoleLogger.get_logger(level="DEBUG")
 
     try:
         with open(args.config, "r") as cfile:
@@ -44,14 +44,14 @@ if __name__ == "__main__":
 
             # zmq pipeline
             n_ctx_value = configure.get("n_io_context", configure.get("n_io_context", 10))
-            pipeline_context = zmq.Context(n_ctx_value)
+            pipe = zmq.Context(n_ctx_value)
 
             # viewer (using open3d)
-            viewer = Open3DVisualizer(config=configure, pipe_context=pipeline_context)
+            viewer = Open3DVisualizer(config=configure, pipe_context=pipe)
             viewer.run()
 
             # terminate pipeline context
-            pipeline_context.term()
+            pipe.term()
             console.info(f"Successfully terminated")
 
     except json.JSONDecodeError as e:

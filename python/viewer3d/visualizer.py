@@ -15,12 +15,12 @@ import threading
 
 from util.logger.console import ConsoleLogger
 from urdf_parser import URDF
-from viewer3d.geomerty import GeometryAPI
+from viewer3d.geomerty import geometryAPI
 from math import pi, cos, sin
 from pytransform3d import rotations, transformations
 import math
 
-class Open3DVisualizer(GeometryAPI):
+class Open3DVisualizer():
     _geometry_container = {}
 
     def __init__(self, config:dict, pipe_context:zmq.Context):
@@ -31,10 +31,10 @@ class Open3DVisualizer(GeometryAPI):
         self.__console = ConsoleLogger.get_logger() # logger
         gui.Application.instance.initialize() # gui
 
-        # create window
+        # create window and scene
         self._window = gui.Application.instance.create_window(title=config["window_title"], 
-                                width=self.__config.get("window_size", [1280, 720])[0],
-                                height=self.__config.get("window_size", [1280, 720])[1])
+                                                              width=self.__config.get("window_size", [1280, 720])[0],
+                                                              height=self.__config.get("window_size", [1280, 720])[1])
         self._scene = gui.SceneWidget()
         self._scene.scene = rendering.Open3DScene(self._window.renderer)
         self._scene.scene.set_background(self.__config.get("background-color", [1.0, 1.0, 1.0, 1.0])) # RGBA
@@ -47,9 +47,10 @@ class Open3DVisualizer(GeometryAPI):
         extrinsic[:3, :3] = rotations.active_matrix_from_extrinsic_euler_xyz([math.radians(90), 0, 0])
         extrinsic[0:3, 3] = [-2.5, 1.0, 4.0]
 
-        initial_viewarea = o3d.geometry.AxisAlignedBoundingBox([-3, -3, -3], [3, 3, 3])
-        self._scene.setup_camera(intrinsics, extrinsic, initial_viewarea)
-        # self._scene.setup_camera(60, initial_viewarea, [0,0,0])
+        # viewpoint 
+        view_bbox = o3d.geometry.AxisAlignedBoundingBox([-3, -3, -3], [3, 3, 3])
+        self._scene.setup_camera(intrinsics, extrinsic, view_bbox)
+        # self._scene.setup_camera(60, view_bbox, [2.5, 2.5, 2])
         self._window.add_child(self._scene)
 
         # initial geometry show
@@ -178,7 +179,7 @@ class Open3DVisualizer(GeometryAPI):
                 for tm, T in fk.items():
                     
                     tm_copy = tm.copy()
-                    tm_copy.apply_transform(T@base_pos)
+                    tm_copy.apply_transform(base_pos@T)
 
                     # convert trimesh to Open3D mesh
                     o3d_mesh = o3d.geometry.TriangleMesh()
@@ -198,12 +199,13 @@ class Open3DVisualizer(GeometryAPI):
 
     def on_show_floor(self):
         if self.__show_floor:
-            width = 5.0   # x축 방향 길이
+            width = 5.0
             depth = 5.0   # y축 방향 길이
             height = 0.01  # 두께 (z축 방향), 너무 얇게 설정
 
             # Open3D 박스 생성 (box는 x, y, z 방향 크기)
             floor = o3d.geometry.TriangleMesh.create_box(width, depth, height)
+            floor.compute_vertex_normals()
 
             # 기본 생성 시, 박스의 한 꼭지점이 원점 (0,0,0)에 위치함
             # 따라서 바닥면을 XY 평면(z=0)에 맞추려면 z방향으로 살짝 이동시킴
@@ -218,45 +220,3 @@ class Open3DVisualizer(GeometryAPI):
 
         else:
             self._scene.scene.remove_geometry("floor")
-
-
-
-    def on_show_urdf2(self):
-        """ Show URDF model """
-        if "urdf" in self.__config:
-            for urdf in self.__config["urdf"]:
-                name = urdf["name"]
-                path = os.path.join(self.__config["root_path"], urdf["path"])
-                self.__console.debug(f"Loading URDF {name} from {path}")
-                
-                if name not in self._geometry_container:
-                    try:
-                        urdf_obj = URDF.load(path)
-                        print(type(urdf_obj))
-                        fk = urdf_obj.visual_trimesh_fk(cfg=None)
-
-                        # meshes = []
-                        # for tm, T in fk.items():
-                        #     tm_copy = tm.copy()
-                        #     tm_copy.apply_transform(T)
-
-                        #     # convert trimesh to Open3D mesh
-                        #     o3d_mesh = o3d.geometry.TriangleMesh()
-                        #     o3d_mesh.vertices = o3d.utility.Vector3dVector(tm_copy.vertices)
-                        #     o3d_mesh.triangles = o3d.utility.Vector3iVector(tm_copy.faces)
-
-                        #     o3d_mesh.compute_vertex_normals()
-                        #     meshes.append(o3d_mesh)
-
-                        #     material = rendering.MaterialRecord()
-                        #     material.shader = "defaultLit"
-                        #     self._scene.scene.add_geometry(f"{name}", o3d_mesh, material)
-
-                        # self.__console.info(f"URDF Meshes {len(meshes)}")
-
-                    except Exception as e:
-                        self.__console.error(f"Failed to load URDF {name}: {e}")
-                else:
-                    self.__console.debug(f"URDF {name} already loaded")
-        else:
-            self.__console.warning("No URDF configuration found")

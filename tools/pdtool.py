@@ -29,6 +29,7 @@ if __name__ == "__main__":
     parser.add_argument('--config', nargs='?', required=False, help="Configuration File(*.cfg)", default="default.cfg")
     parser.add_argument('--file', nargs='?', required=True, help="Polygon File Format(*.ply)", default="default.ply")
     parser.add_argument('--verbose', nargs='?', required=False, help="Enable/Disable verbose", default=True)
+    parser.add_argument('--sample', nargs='?', required=False, help="Number of Samples", default=10000)
     args = parser.parse_args()
 
     app = None
@@ -54,7 +55,7 @@ if __name__ == "__main__":
                 
                 mesh = o3d.io.read_triangle_mesh(args.file)
                 mesh.compute_vertex_normals()
-                pcl = mesh.sample_points_poisson_disk(number_of_points=10000)
+                pcl = mesh.sample_points_poisson_disk(number_of_points=args.sample, use_triangle_normal=True)
                 hull, _ = pcl.compute_convex_hull()
                 hull_ls = o3d.geometry.LineSet.create_from_triangle_mesh(hull)
                 hull_ls.paint_uniform_color((1, 0, 0))
