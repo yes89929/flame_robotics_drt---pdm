@@ -11,8 +11,9 @@ import zmq
 import argparse
 
 from util.logger.console import ConsoleLogger
-#from viewer3d.window import Open3DViewer
 from viewer3d.visualizer import Open3DVisualizer
+from common.zpipe import zpipe_create_pipe, zpipe_destroy_pipe
+from common.zpipe import ZPipe
 
 # root directory registration on system environment
 ROOT_PATH = pathlib.Path(__file__).parent.parent
@@ -42,16 +43,16 @@ if __name__ == "__main__":
                 console.debug(f"Application Path : {configure['app_path']}")
                 console.debug(f"Verbose Level : {configure['verbose_level']}")
 
-            # zmq pipeline
-            n_ctx_value = configure.get("n_io_context", configure.get("n_io_context", 10))
-            pipe = zmq.Context(n_ctx_value)
+            # create zpipe context
+            n_ctx_value = configure.get("n_io_context", 10)
+            zpipe_instance = zpipe_create_pipe(io_threads=n_ctx_value)
 
             # viewer (using open3d)
-            viewer = Open3DVisualizer(config=configure, pipe_context=pipe)
+            viewer = Open3DVisualizer(config=configure, zpipe=zpipe_instance)
             viewer.run()
 
-            # terminate pipeline context
-            pipe.term()
+            # terminate pipeline
+            zpipe_destroy_pipe()
             console.info(f"Successfully terminated")
 
     except json.JSONDecodeError as e:
