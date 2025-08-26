@@ -21,11 +21,12 @@ from pytransform3d import rotations, transformations
 import math
 from pytransform3d.transformations import transform_from
 from pytransform3d.rotations import matrix_from_euler
+from common.zpipe import AsyncZSocket, ZPipe
 
 class Open3DVisualizer():
     _geometry_container = {}
 
-    def __init__(self, config:dict, pipe_context:zmq.Context):
+    def __init__(self, config:dict, zpipe:ZPipe):
         super().__init__()
 
         # initialize
@@ -35,11 +36,11 @@ class Open3DVisualizer():
 
         # create window and scene
         self._window = gui.Application.instance.create_window(title=config["window_title"], 
-                                                              width=self.__config.get("window_size", [1280, 720])[0],
-                                                              height=self.__config.get("window_size", [1280, 720])[1])
+                                                              width=config.get("window_size", [1280, 720])[0],
+                                                              height=config.get("window_size", [1280, 720])[1])
         self._scene = gui.SceneWidget()
         self._scene.scene = rendering.Open3DScene(self._window.renderer)
-        self._scene.scene.set_background(self.__config.get("background-color", [1.0, 1.0, 1.0, 1.0])) # RGBA
+        self._scene.scene.set_background(config.get("background-color", [1.0, 1.0, 1.0, 1.0])) # RGBA
         self._scene.scene.scene.set_sun_light([-1, -1, -1], [1, 1, 1], 100000)
         self._scene.scene.scene.enable_sun_light(True)        
 
@@ -55,63 +56,50 @@ class Open3DVisualizer():
         # self._scene.setup_camera(60, view_bbox, [2.5, 2.5, 2])
         self._window.add_child(self._scene)
 
-        # initial geometry show
-        self.__show_origin_coord = self.__config.get("show_origin", False)
-        self.on_show_origin_coord()
-        self.__show_robot = self.__config.get("show_robot", False)
-        self.on_show_urdf()
-        self.__show_floor = self.__config.get("show_floor", False)
-        self.on_show_floor()
+        # show initial geometry
+        self.show_initial_geometry(config=config)
 
         # close event
-        self._window.set_on_close(self.close)
+        self._window.set_on_close(self.on_close)
 
         # key event callbacks
         self._window.set_on_key(self.on_key_event)
 
-        # zmq message/data pipeline
-        self.__socket_sub = pipe_context.socket(zmq.SUB)
-        self.__socket_sub.setsockopt(zmq.RCVHWM, 100)
-        self.__socket_sub.setsockopt(zmq.RCVTIMEO, 500)
-        self.__socket_sub.setsockopt(zmq.LINGER, 0)
-        self.__socket_sub.connect(f"{config['pipeline_transport']}://localhost:{config['pipeline_port']}")
-        self.__socket_sub.subscribe("call")
-
-        # threading for meg pipeline subscriber
-        self.__stop_pipe_event = threading.Event()
-        self.__pipe_worker = threading.Thread(target=self.__pipe_sub_process, args=(self.__stop_pipe_event,), daemon=False)
-        self.__pipe_worker.start()
-
+        # create & join asynczsocket
+        self.__subscriber_socket = AsyncZSocket("Open3DVisualizer", "subscribe")
+        if self.__subscriber_socket.create(pipeline=zpipe):
+            transport = config.get("transport", "tcp")
+            port = config.get("port", 9001)
+            host = config.get("host", "localhost")
+            if self.__subscriber_socket.join(transport, host, port):
+                self.__subscriber_socket.subscribe("call")
+                self.__subscriber_socket.set_callback(self.__on_data_received)
+                self.__console.debug(f"Subscriber socket created and joined: {transport}://{host}:{port}")
+            else:
+                self.__console.error("Failed to join subscriber socket")
+        else:
+            self.__console.error("Failed to create subscriber socket")
+    
+        
         # flags
         self.__show_origin_coord = False
 
-    def __pipe_sub_process(self, stop_event):
-        """ subscriber process """
-        poller = zmq.Poller()
-        poller.register(self.__socket_sub, zmq.POLLIN)
+    def show_initial_geometry(self, config:dict):
+        """ Show initial geometry """
+        self.on_show_origin_coord(show=config.get("show_origin", False))
+        self.on_show_urdf(show=config.get("show_robot", False))
+        self.on_show_floor(show=config.get("show_floor", False))
 
-        while not stop_event.is_set():
-            try:
-                events = dict(poller.poll(1000)) # wait 1 sec
-                if self.__socket_sub in events:
-                    if events[self.__socket_sub] == zmq.POLLIN:
-                        topic, msg = self.__socket_sub.recv_multipart()
-                        self.__call(topic, msg)
-                        self._window.post_redraw()  # Redraw the GUI after processing the message
-                        
-            except json.JSONDecodeError as e:
-                self.__console.error(f"({self.__class__.__name__}) {e}")
-                continue
-            except zmq.ZMQError as e:
-                self.__console.error(f"({self.__class__.__name__}) {e}")
-            except Exception as e:
-                self.__console.error(f"({self.__class__.__name__}) {e}")
-
-        # close pipeline
-        poller.unregister(self.__socket_sub)
-        self.__socket_sub.setsockopt(zmq.LINGER, 0)
-        self.__socket_sub.close()
-        self.__console.debug(f"({self.__class__.__name__}) Closed Pipeline")
+    def __on_data_received(self, multipart_data):
+        """Callback function for zpipe data reception"""
+        try:
+            if len(multipart_data) >= 2:
+                topic = multipart_data[0]
+                msg = multipart_data[1]
+                self.__call(topic, msg)
+                self._window.post_redraw()  # Redraw the GUI after processing the message
+        except Exception as e:
+            self.__console.error(f"({self.__class__.__name__}) Error processing received data: {e}")
 
     def __call(self, topic:str, msg:str):
         """ for zmqrpc-like call function """
@@ -127,35 +115,37 @@ class Open3DVisualizer():
             except Exception as e:
                 self.__console.error(f"({self.__class__.__name__}) {e}")
 
-    def close(self):
+    def on_close(self):
         """ close window and stop all """
-        # zmq pipeline terminate (until exit)
-        self.__stop_pipe_event.set()
-        self.__pipe_worker.join(timeout=3)
-
-        # self._window.close()
+        # Clean up subscriber socket first
+        if hasattr(self, '_Open3DVisualizer__subscriber_socket') and self.__subscriber_socket:
+            self.__subscriber_socket.destroy_socket()
+            self.__console.debug(f"({self.__class__.__name__}) Destroyed subscriber socket")
+        
+        # Quit the GUI application
         gui.Application.instance.quit()
-        self.__console.debug(f"({self.__class__.__name__}) Closed 3D Window")
+        self.__console.debug(f"({self.__class__.__name__}) Closed Window")
 
         return True
     
     def on_key_event(self, event):
         """ key event"""
-        if event.type == gui.KeyEvent.DOWN and event.key == gui.KeyName.O:
-           self.__show_origin_coord = not self.__show_origin_coord
-           self.on_show_origin_coord()
-           return True
-        elif event.type == gui.KeyEvent.DOWN and event.key == gui.KeyName.U:
-            self.on_show_urdf()
-            return True
-        return False
+        pass
+        # if event.type == gui.KeyEvent.DOWN and event.key == gui.KeyName.O:
+        #    self.__show_origin_coord = not self.__show_origin_coord
+        #    self.on_show_origin_coord()
+        #    return True
+        # elif event.type == gui.KeyEvent.DOWN and event.key == gui.KeyName.U:
+        #     self.on_show_urdf()
+        #     return True
+        # return False
 
     def run(self):
         gui.Application.instance.run()
 
-    def on_show_origin_coord(self):
+    def on_show_origin_coord(self, show:bool):
         """ Show origin coordinate """
-        if self.__show_origin_coord:
+        if show:
             frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
             material = rendering.MaterialRecord()
             material.shader = "defaultLit"
@@ -163,9 +153,9 @@ class Open3DVisualizer():
         else:
             self._scene.scene.remove_geometry("origin_frame")
 
-    def on_show_urdf(self):
+    def on_show_urdf(self, show:bool):
         """ show robot URDF model"""
-        if self.__show_robot:
+        if show:
             for urdf in self.__config["urdf"]:
                 name = urdf["name"]
                 urdf_file = os.path.join(self.__config["root_path"], urdf["path"])
@@ -204,8 +194,8 @@ class Open3DVisualizer():
         else:
             pass
 
-    def on_show_floor(self):
-        if self.__show_floor:
+    def on_show_floor(self, show:bool):
+        if show:
             width = 5.0
             depth = 5.0   # y축 방향 길이
             height = 0.01  # 두께 (z축 방향), 너무 얇게 설정
