@@ -15,6 +15,8 @@ import sys, os
 import pathlib
 import json
 import atexit
+from common.zpipe import zpipe_create_pipe, zpipe_destroy_pipe
+from common.zpipe import ZPipe
 
 # root directory registration on system environment
 ROOT_PATH = pathlib.Path(__file__).parent.parent
@@ -53,21 +55,22 @@ if __name__ == "__main__":
                 console.debug(f"Verbose Level : {configure['verbose_level']}")
 
             # zmq pipeline
-            n_ctx_value = configure.get("n_io_context", configure.get("n_io_context", 10))
-            pipe = zmq.Context(n_ctx_value)
+            # create zpipe context
+            n_ctx_value = configure.get("n_io_context", 10)
+            zpipe_instance = zpipe_create_pipe(io_threads=n_ctx_value)
 
             app = QApplication(sys.argv)
             font_id = QFontDatabase.addApplicationFont((ROOT_PATH / configure['font_path']).as_posix())
             font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
             app.setFont(QFont(font_family, 12))
-            main_window = ControlWindow(config=configure, pipe_context=pipe)
+            main_window = ControlWindow(config=configure, zpipe=zpipe_instance)
             main_window.show()
 
             exit_cdoe = app.exec()
 
             # terminate pipeline
-            pipe.term()
-            console.info("Application successfully terminated.")
+            zpipe_destroy_pipe()
+            console.info(f"Successfully terminated")
             sys.exit(exit_cdoe)
 
     except json.JSONDecodeError as e:
