@@ -89,6 +89,7 @@ class AppWindow(QMainWindow):
 
                     # button actions
                     self.btn_open_pcd.clicked.connect(self.on_open_pcd)
+                    self.btn_load_pcd.clicked.connect(self.on_load_pcd)
                     self.btn_run_simulation.clicked.connect(self.on_run_simulation)
                     self.btn_stop_simulation.clicked.connect(self.on_stop_simulation)
                     self.btn_geometry_remove_all.clicked.connect(self.on_btn_geometry_remove_all)
@@ -153,13 +154,19 @@ class AppWindow(QMainWindow):
     
     def on_open_pcd(self):
         """ Open PCD file dialog """
-        pcd_file, _ = QFileDialog.getOpenFileName(self, "Open PCD File", "", "PCD Files (*.pcd);;All Files (*)")
+        pcd_file, _ = QFileDialog.getOpenFileName(self, "Open PCD File", "", "PCD Files (*.pcd);PLY Files (*.ply);All Files (*)")
         if pcd_file:
             self.__console.info(f"Selected PCD file: {pcd_file}")
             self.edit_pcd_file.setText(pcd_file)
-            self.__call(socket=self._socket_pub, function="API_add_pcd", kwargs={"name":os.path.basename(pcd_file), "path":pcd_file, "pos":[0.0, 0.0, 0.0]})
         else:
             self.__console.warning("No PCD file selected.")
+    
+    def on_load_pcd(self):
+        """ Load PCD file """
+        self.__console.info(f"({self.__class__.__name__}) Loading PCD file")
+        pcd_file = self.edit_pcd_file.text()
+        self.__call(socket=self.__socket, function="API_add_pcd", kwargs={"name":os.path.basename(pcd_file), "path":pcd_file, "pos":[0.0, 0.0, 0.0]})
+    
 
     def on_run_simulation(self):
         """ Run Simulation """
