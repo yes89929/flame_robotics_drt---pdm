@@ -25,46 +25,20 @@ from functools import partial
 
 
 from util.logger.console import ConsoleLogger
-from python.common.urdf_parser import URDFParser
-from python.common.pipeline import Publisher as Pub
-from python.common.pipeline import Subscriber as Sub
+from common.urdf_parser import URDFParser
+from common.zpipe import AsyncZSocket, ZPipe
 
 # global variable
 scale_factor = 1000
 
 
 class AppWindow(QMainWindow):
-    def __init__(self, config:dict, pipe_context:zmq.Context):
+    def __init__(self, config:dict, zpipe:ZPipe):
         """ initialization """
         super().__init__()
         
         self.__console = ConsoleLogger.get_logger() # logger
         self.__config = config  # copy configuration data
-
-        # self.publisher = Pub(context=pipe_context)
-        # self.subscriber = Sub(context=pipe_context)
-
-        # # publisher
-        # self._socket_pub = pipe_context.socket(zmq.PUB)
-        # self._socket_pub.setsockopt(zmq.SNDHWM, 100)
-        # self._socket_pub.setsockopt(zmq.LINGER, 0)
-        # self._socket_pub.bind("tcp://localhost:9001")
-
-        # # subscriber
-        # self._socket_sub = pipe_context.socket(zmq.SUB)
-        # self._socket_sub.setsockopt(zmq.RCVHWM, 100)
-        # self._socket_sub.setsockopt(zmq.RCVTIMEO, 500)
-        # self._socket_sub.setsockopt(zmq.LINGER, 0)
-        # self._socket_sub.connect("tcp://localhost:9000")
-        # self._socket_sub.subscribe("call")
-
-        # self._stop_zmq_event = threading.Event()
-        # self._zmq_pipeline_thread = threading.Thread(target=self.zmq_recv_process, args=(self._stop_zmq_event,), daemon=True)
-        # self._zmq_pipeline_thread.start()
-
-        # sub windows
-        # self.__pdm_window = PDMWindow(context, self._socket_pub, config)
-        # self.__rcm_window = RCMWindow(context, self._socket_pub, config)
 
         try:            
             if "gui" in config:
@@ -72,6 +46,20 @@ class AppWindow(QMainWindow):
                 if os.path.isfile(ui_path):
                     loadUi(ui_path, self)
                     self.setWindowTitle(config.get("window_title", "DRT Control Window"))
+
+                    # create & join asynczsocket
+                    self.__socket = AsyncZSocket("Controller", "publish")
+                    if self.__socket.create(pipeline=zpipe):
+                        transport = config.get("transport", "tcp")
+                        port = config.get("port", 9001)
+                        host = config.get("host", "localhost")
+                        if self.__socket.join(transport, host, port):
+                            self.__socket.set_message_callback(self.__on_data_received)
+                            self.__console.debug(f"Socket created and joined: {transport}://{host}:{port}")
+                        else:
+                            self.__console.error("Failed to join socket")
+                    else:
+                        self.__console.error("Failed to create socket")
 
                     # Initialize URDF parser and joint limits
                     self.urdf_parser = None
@@ -110,49 +98,55 @@ class AppWindow(QMainWindow):
                 
         except Exception as e:
             self.__console.error(f"{e}")
+
+    def __on_data_received(self, multipart_data):
+        """Callback function for zpipe data reception"""
+        try:
+            if len(multipart_data) >= 2:
+                topic = multipart_data[0]
+                msg = multipart_data[1]
+                self.__call(topic, msg)
+                self._window.post_redraw()  # Redraw the GUI after processing the message
+        except Exception as e:
+            self.__console.error(f"({self.__class__.__name__}) Error processing received data: {e}")
+
     
-    def zmq_recv_process(self, stop_event):
-        """ zmq pipeline process for receiving data """
+    # def zmq_recv_process(self, stop_event):
+    #     """ zmq pipeline process for receiving data """
 
-        poller = zmq.Poller()
-        poller.register(self._socket_sub, zmq.POLLIN)
+    #     poller = zmq.Poller()
+    #     poller.register(self._socket_sub, zmq.POLLIN)
         
-        while not stop_event.is_set():
-            try:
-                events = dict(poller.poll(1000)) # wait 1 sec
-                if self._socket_sub in events:
-                    if events[self._socket_sub] == zmq.POLLIN:
-                        # for 'call' topic
-                        topic, msg = self._socket_sub.recv_multipart()
-                        if topic.decode() == "call":
-                            data = json.loads(msg.decode('utf8').replace("'", '"'))
-                            print(f"recv : {data}")
+    #     while not stop_event.is_set():
+    #         try:
+    #             events = dict(poller.poll(1000)) # wait 1 sec
+    #             if self._socket_sub in events:
+    #                 if events[self._socket_sub] == zmq.POLLIN:
+    #                     # for 'call' topic
+    #                     topic, msg = self._socket_sub.recv_multipart()
+    #                     if topic.decode() == "call":
+    #                         data = json.loads(msg.decode('utf8').replace("'", '"'))
+    #                         print(f"recv : {data}")
                 
-            except json.JSONDecodeError as e:
-                print(f"[Graphic 3D Window] {e}")
-                continue
-            except zmq.ZMQError as e:
-                print(f"[Graphic 3D Window] {e}")
-                break
-            except Exception as e:
-                print(f"[Graphic 3D Window] {e}")
-                break
+    #         except json.JSONDecodeError as e:
+    #             print(f"[Graphic 3D Window] {e}")
+    #             continue
+    #         except zmq.ZMQError as e:
+    #             print(f"[Graphic 3D Window] {e}")
+    #             break
+    #         except Exception as e:
+    #             print(f"[Graphic 3D Window] {e}")
+    #             break
 
-        poller.unregister(self._socket_sub)
+    #     poller.unregister(self._socket_sub)
 
     
     def closeEvent(self, event:QCloseEvent) -> None:
         """ Handle close event """
-
-        # zmq pipeline terminate
-        # self._stop_zmq_event.set()
-        # self._zmq_pipeline_thread.join(timeout=3)
-
-        # try:
-        #     self._socket_sub.setsockopt(zmq.LINGER, 0)
-        #     self._socket_sub.close()
-        # except zmq.ZMQError as e:
-        #     print(f"[Graphic 3D Window] {e}")
+         # Clean up subscriber socket first
+        if hasattr(self, '_AppWindow__socket') and self.__socket:
+            self.__socket.destroy_socket()
+            self.__console.debug(f"({self.__class__.__name__}) Destroyed socket")
 
         self.__console.info("Successfully Closed")
         return super().closeEvent(event)
@@ -179,14 +173,13 @@ class AppWindow(QMainWindow):
     def on_btn_geometry_remove_all(self):
         """ Clear all geometry """
         self.__console.info(f"({self.__class__.__name__}) Clear all geometry")
-        self.__call(socket=self._socket_pub, function="API_clear_all_geometry", kwargs={})
+        self.__call(socket=self.__socket, function="API_clear_all_geometry", kwargs={})
 
     def on_slide_control_update(self, value, joint:str):
         slider = self.sender()
         self.findChild(QLineEdit, f"edit_{slider.objectName()}").setText(str(value/scale_factor))
-        print(f"{joint}:{value/scale_factor}")
-        
-        # self.__call(socket=self._socket_pub, function="API_set_rt_gx", kwargs={"value":value})
+        self.__call(socket=self.__socket, function="API_set_joint_value", kwargs={"joint": joint, "value": value/scale_factor})
+        #self.__socket.dispatch([json.dumps({"function": "API_set_rt_gx", "kwargs": {"value": value}})])
 
     def _setup_sliders(self, dda_side_joint_limits:dict, rt_side_joint_limits:dict):
         """Setup sliders with URDF joint limits"""
@@ -255,10 +248,10 @@ class AppWindow(QMainWindow):
             topic = "call"
             message = { "function":function,"kwargs":kwargs}
             if socket:
-                socket.send_multipart([topic.encode(), json.dumps(message).encode()])
-                print(f"send {topic}, {function}")
+                socket.dispatch([topic, json.dumps(message)])
             else:
                 self.__console.warning(f"Failed send")
+            
         except zmq.ZMQError as e:
             self.__console.error(f"[Main Window] {e}")
         except json.JSONDecodeError as e:

@@ -30,7 +30,7 @@ class AsyncZSocket:
         self.console = ConsoleLogger.get_logger()
         
         # Validate pattern
-        valid_patterns = ['publish', 'subscribe', 'push', 'pull', 'dealer', 'router', 'pair']
+        valid_patterns = ['publish', 'subscribe', 'push', 'pull', 'dealer', 'router', 'server_pair', 'client_pair']
         if pattern not in valid_patterns:
             raise ValueError(f"Invalid pattern: {pattern}. Valid options: {valid_patterns}")
     
@@ -62,11 +62,13 @@ class AsyncZSocket:
                 self.socket.setsockopt(zmq.RCVHWM, 100)
                 self.socket.setsockopt(zmq.RCVTIMEO, 100)
                 self.socket.setsockopt(zmq.LINGER, 0)
+                self.socket.setsockopt(zmq.RECONNECT_IVL, 500)
                 
             if self.pattern in ['publish', 'push', 'router', 'client_pair']:
                 self.socket.setsockopt(zmq.SNDHWM, 100)
                 self.socket.setsockopt(zmq.SNDTIMEO, 100)
                 self.socket.setsockopt(zmq.LINGER, 0)
+                self.socket.setsockopt(zmq.RECONNECT_IVL, 500)
                 
             # Register this socket with ZPipe for management
             pipeline.register_socket(self)
@@ -160,7 +162,7 @@ class AsyncZSocket:
         self.is_joined = False
         self.console.debug(f"Destroyed socket {self.socket_id}")
     
-    def set_callback(self, callback: Callable[[List[bytes]], None]) -> bool:
+    def set_message_callback(self, callback: Callable[[List[bytes]], None]) -> bool:
         """Set callback function for receiving multipart data"""
         if not callable(callback):
             self.console.error("Callback must be callable")
@@ -190,7 +192,7 @@ class AsyncZSocket:
                     byte_data.append(item)
             
             # Send multipart message
-            self.socket.send_multipart(byte_data, zmq.NOBLOCK)
+            self.socket.send_multipart(byte_data)
             return True
             
         except zmq.Again:
@@ -211,6 +213,10 @@ class AsyncZSocket:
                 topic = topic.encode('utf-8')
             self.socket.setsockopt(zmq.SUBSCRIBE, topic)
             self.console.debug(f"Subscribed to topic: {topic}")
+
+            if self.is_joined:
+                self._start_receiver_thread()
+
             return True
         except Exception as e:
             self.console.error(f"Failed to subscribe to topic: {e}")
