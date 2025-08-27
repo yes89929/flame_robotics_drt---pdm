@@ -66,13 +66,13 @@ class Open3DVisualizer():
         self._window.set_on_key(self.on_key_event)
 
         # create & join asynczsocket
-        self.__socket = AsyncZSocket("Open3DVisualizer", "server_pair")
+        self.__socket = AsyncZSocket("Open3DVisualizer", "subscribe")
         if self.__socket.create(pipeline=zpipe):
             transport = config.get("transport", "tcp")
             port = config.get("port", 9001)
             host = config.get("host", "localhost")
             if self.__socket.join(transport, host, port):
-                # self.__socket.subscribe("call")
+                self.__socket.subscribe("call")
                 self.__socket.set_callback(self.__on_data_received)
                 self.__console.debug(f"Socket created and joined: {transport}://{host}:{port}")
             else:
@@ -120,7 +120,7 @@ class Open3DVisualizer():
         # Clean up subscriber socket first
         if hasattr(self, '_Open3DVisualizer__socket') and self.__socket:
             self.__socket.destroy_socket()
-            self.__console.debug(f"({self.__class__.__name__}) Destroyed subscriber socket")
+            self.__console.debug(f"({self.__class__.__name__}) Destroyed socket")
         
         # Quit the GUI application
         gui.Application.instance.quit()
