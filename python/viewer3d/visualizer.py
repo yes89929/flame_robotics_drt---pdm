@@ -66,19 +66,19 @@ class Open3DVisualizer():
         self._window.set_on_key(self.on_key_event)
 
         # create & join asynczsocket
-        self.__subscriber_socket = AsyncZSocket("Open3DVisualizer", "subscribe")
-        if self.__subscriber_socket.create(pipeline=zpipe):
+        self.__socket = AsyncZSocket("Open3DVisualizer", "server_pair")
+        if self.__socket.create(pipeline=zpipe):
             transport = config.get("transport", "tcp")
             port = config.get("port", 9001)
             host = config.get("host", "localhost")
-            if self.__subscriber_socket.join(transport, host, port):
-                self.__subscriber_socket.subscribe("call")
-                self.__subscriber_socket.set_callback(self.__on_data_received)
-                self.__console.debug(f"Subscriber socket created and joined: {transport}://{host}:{port}")
+            if self.__socket.join(transport, host, port):
+                # self.__socket.subscribe("call")
+                self.__socket.set_callback(self.__on_data_received)
+                self.__console.debug(f"Socket created and joined: {transport}://{host}:{port}")
             else:
-                self.__console.error("Failed to join subscriber socket")
+                self.__console.error("Failed to join socket")
         else:
-            self.__console.error("Failed to create subscriber socket")
+            self.__console.error("Failed to create socket")
     
         
         # flags
@@ -118,8 +118,8 @@ class Open3DVisualizer():
     def on_close(self):
         """ close window and stop all """
         # Clean up subscriber socket first
-        if hasattr(self, '_Open3DVisualizer__subscriber_socket') and self.__subscriber_socket:
-            self.__subscriber_socket.destroy_socket()
+        if hasattr(self, '_Open3DVisualizer__socket') and self.__socket:
+            self.__socket.destroy_socket()
             self.__console.debug(f"({self.__class__.__name__}) Destroyed subscriber socket")
         
         # Quit the GUI application

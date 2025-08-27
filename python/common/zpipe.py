@@ -30,7 +30,7 @@ class AsyncZSocket:
         self.console = ConsoleLogger.get_logger()
         
         # Validate pattern
-        valid_patterns = ['publish', 'subscribe', 'push', 'pull', 'dealer', 'router', 'pair']
+        valid_patterns = ['publish', 'subscribe', 'push', 'pull', 'dealer', 'router', 'server_pair', 'client_pair']
         if pattern not in valid_patterns:
             raise ValueError(f"Invalid pattern: {pattern}. Valid options: {valid_patterns}")
     
