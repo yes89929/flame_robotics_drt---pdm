@@ -17,7 +17,7 @@ $ source ./venv/bin/activate
 (venv)$ python viewer3d.py
 ```
 
-3. Launch Simulation Manager
+3. Launch Simulation Controller
 ```
-(venv)$ python manager.py
+(venv)$ python controller.py
 ```
