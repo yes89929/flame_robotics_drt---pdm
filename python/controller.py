@@ -1,5 +1,5 @@
 '''
-DRT 3D Window Manager with Qt GUI
+DRT 3D Window Controller with Qt GUI
 @auhtor Byunghun Hwang<bh.hwnag@iae.re.kr>
 '''
 
@@ -25,14 +25,14 @@ import argparse
 import multiprocessing
 import zmq
 from multiprocessing import Process
-from python.manager.manager import AppWindow as MainWindow
+from controller.window import AppWindow as ControlWindow
 from util.logger.console import ConsoleLogger
 
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', nargs='?', required=False, help="Configuration File(*.cfg)", default="manager.cfg")
+    parser.add_argument('--config', nargs='?', required=False, help="Configuration File(*.cfg)", default="controller.cfg")
     parser.add_argument('--verbose_level', nargs='?', required=False, help="Set Verbose Level", default="DEBUG")
     args = parser.parse_args()
 
@@ -54,19 +54,19 @@ if __name__ == "__main__":
 
             # zmq pipeline
             n_ctx_value = configure.get("n_io_context", configure.get("n_io_context", 10))
-            pipeline_context = zmq.Context(n_ctx_value)
+            pipe = zmq.Context(n_ctx_value)
 
             app = QApplication(sys.argv)
             font_id = QFontDatabase.addApplicationFont((ROOT_PATH / configure['font_path']).as_posix())
             font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
             app.setFont(QFont(font_family, 12))
-            main_window = MainWindow(pipeline_context, config=configure)
+            main_window = ControlWindow(config=configure, pipe_context=pipe)
             main_window.show()
 
             exit_cdoe = app.exec()
 
             # terminate pipeline
-            pipeline_context.term()
+            pipe.term()
             console.info("Application successfully terminated.")
             sys.exit(exit_cdoe)
 
