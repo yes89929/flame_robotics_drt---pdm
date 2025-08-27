@@ -23,7 +23,7 @@ from pytransform3d.transformations import transform_from
 from pytransform3d.rotations import matrix_from_euler
 from common.zpipe import AsyncZSocket, ZPipe
 
-class Open3DVisualizer():
+class Open3DVisualizer(geometryAPI):
     _geometry_container = {}
 
     def __init__(self, config:dict, zpipe:ZPipe):
@@ -73,7 +73,7 @@ class Open3DVisualizer():
             host = config.get("host", "localhost")
             if self.__socket.join(transport, host, port):
                 self.__socket.subscribe("call")
-                self.__socket.set_callback(self.__on_data_received)
+                self.__socket.set_message_callback(self.__on_data_received)
                 self.__console.debug(f"Socket created and joined: {transport}://{host}:{port}")
             else:
                 self.__console.error("Failed to join socket")
@@ -96,13 +96,33 @@ class Open3DVisualizer():
             if len(multipart_data) >= 2:
                 topic = multipart_data[0]
                 msg = multipart_data[1]
-                self.__call(topic, msg)
-                self._window.post_redraw()  # Redraw the GUI after processing the message
+                
+                self.__zpipe_msg_process(multipart_data)
         except Exception as e:
             self.__console.error(f"({self.__class__.__name__}) Error processing received data: {e}")
+    
+    def __process_pending_data(self):
+        """Process pending data in the main GUI thread"""
+        try:
+            if hasattr(self, '__pending_data') and self.__pending_data:
+                self.__zpipe_msg_process(self.__pending_data)
+                self._window.post_redraw()  # Redraw the GUI after processing the message
+                self.__pending_data = None
+        except Exception as e:
+            self.__console.error(f"({self.__class__.__name__}) Error processing pending data: {e}")
+    
+    def __on_status_received(self, status:dict):
+        """Callback function for zpipe status reception"""
+        self.__console.debug(f"({self.__class__.__name__}) Received status: {status}")
 
-    def __call(self, topic:str, msg:str):
-        """ for zmqrpc-like call function """
+    def __zpipe_msg_process(self, multipart_data):
+        if len(multipart_data) < 2:
+            self.__console.error(f"({self.__class__.__name__}) Invalid multipart data received")
+            return
+
+        topic = multipart_data[0]
+        msg = multipart_data[1]
+
         if topic.decode() == "call":
             msg_decoded = json.loads(msg.decode('utf8').replace("'", '"'))
             try:
@@ -110,6 +130,7 @@ class Open3DVisualizer():
                 function = getattr(super(), function_name)
                 kwargs = msg_decoded["kwargs"]
                 function(self._scene, **kwargs)
+
             except json.JSONDecodeError as e:
                 self.__console.error(f"({self.__class__.__name__}) {e}")
             except Exception as e:
@@ -122,10 +143,23 @@ class Open3DVisualizer():
             self.__socket.destroy_socket()
             self.__console.debug(f"({self.__class__.__name__}) Destroyed socket")
         
-        # Quit the GUI application
-        gui.Application.instance.quit()
+        # Clean up Open3D resources before quitting
+        try:
+            # Clear scene geometry
+            if hasattr(self, '_scene') and self._scene:
+                self._scene.scene.clear_geometry()
+            
+            # Properly shutdown GUI application
+            gui.Application.instance.quit()
+            
+            # Force cleanup of Open3D resources
+            import gc
+            gc.collect()
+            
+        except Exception as e:
+            self.__console.error(f"({self.__class__.__name__}) Error during cleanup: {e}")
+        
         self.__console.debug(f"({self.__class__.__name__}) Closed Window")
-
         return True
     
     def on_key_event(self, event):
