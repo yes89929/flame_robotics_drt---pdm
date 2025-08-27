@@ -83,7 +83,7 @@ def subscriber_example():
             
             # Step 5: Configure subscription and callback
             sub_socket.subscribe("call")  # Subscribe to "call" topic
-            sub_socket.set_callback(message_handler)
+            sub_socket.set_message_callback(message_handler)
             
             # Step 6: Keep running until shutdown signal
             while not shutdown_event.is_set():

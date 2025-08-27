@@ -47,7 +47,7 @@ def pair_server_example():
             print("PAIR server socket created and bound successfully")
             
             # Step 5: Set callback for receiving messages
-            pair_socket.set_callback(message_handler)
+            pair_socket.set_message_callback(message_handler)
             
             # Step 6: Send some messages to client
             for i in range(3):
@@ -91,7 +91,7 @@ def pair_client_example():
             print("PAIR client socket created and connected successfully")
             
             # Step 5: Set callback for receiving messages
-            pair_socket.set_callback(message_handler)
+            pair_socket.set_message_callback(message_handler)
             
             # Step 6: Send some messages to server
             for i in range(3):
