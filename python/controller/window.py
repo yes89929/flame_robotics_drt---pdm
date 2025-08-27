@@ -165,7 +165,7 @@ class AppWindow(QMainWindow):
         """ Load PCD file """
         self.__console.info(f"({self.__class__.__name__}) Loading PCD file")
         pcd_file = self.edit_pcd_file.text()
-        self.__call(socket=self.__socket, function="API_add_pcd", kwargs={"name":os.path.basename(pcd_file), "path":pcd_file, "pos":[0.0, 0.0, 0.0]})
+        self.__call(socket=self.__socket, function="API_add_pcd", kwargs={"name":os.path.basename(pcd_file), "path":pcd_file, "pos":[0.0, 0.0, 0.0], "point_size":0.2})
     
 
     def on_run_simulation(self):
