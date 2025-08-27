@@ -230,24 +230,25 @@ class Open3DVisualizer(geometryAPI):
 
     def on_show_floor(self, show:bool):
         if show:
-            width = 5.0
-            depth = 5.0   # y축 방향 길이
-            height = 0.01  # 두께 (z축 방향), 너무 얇게 설정
-
-            # Open3D 박스 생성 (box는 x, y, z 방향 크기)
+            config_floor = self.__config.get("floor", {"name":"floor", "size":[5.0, 5.0, 0.0]})
+            width = config_floor.get("size", [5.0, 5.0, 0.0])[0]
+            depth = config_floor.get("size", [5.0, 5.0, 0.0])[1]
+            height = config_floor.get("size", [5.0, 5.0, 0.0])[2]
+            
+            # draw floor(box)
             floor = o3d.geometry.TriangleMesh.create_box(width, depth, height)
             floor.compute_vertex_normals()
 
-            # 기본 생성 시, 박스의 한 꼭지점이 원점 (0,0,0)에 위치함
-            # 따라서 바닥면을 XY 평면(z=0)에 맞추려면 z방향으로 살짝 이동시킴
+            # move floor to z=0
             floor.translate((0, 0, -height))
 
-            # 바닥면 색깔 설정 (회색 계열)
-            floor.paint_uniform_color([0.7, 0.7, 0.7])
+            # set color
+            floor.paint_uniform_color(config_floor.get("color", [0.1, 0.1, 0.1]))
 
+            # material
             material = rendering.MaterialRecord()
             material.shader = "defaultLit"
-            self._scene.scene.add_geometry("floor", floor, material)
+            self._scene.scene.add_geometry(config_floor.get("name", "floor"), floor, material)
 
         else:
-            self._scene.scene.remove_geometry("floor")
+            self._scene.scene.remove_geometry(config_floor.get("name", "floor"))

@@ -45,7 +45,7 @@ class geometryAPI:
             scene.scene.remove_geometry(geometry_name)
             del self.__geometry_container[geometry_name]
     
-    def API_add_pcd(self, scene, name:str, path:str, pos:list=[0,0,0], ori:list=[0,0,0], color:list=[0,0,0]):
+    def API_add_pcd(self, scene, name:str, path:str, pos:list=[0,0,0], ori:list=[0,0,0], color:list=[0,0,0], point_size:float=1.0):
         """ add pcd geometry """
         self.__console.debug(f"Call API_add_pcd : {name} ({path})")
         obj = o3d.io.read_point_cloud(path)
@@ -64,6 +64,7 @@ class geometryAPI:
         if not name in self.__geometry_container.keys():
             mat = rendering.MaterialRecord()
             mat.shader = "defaultUnlit"
+            mat.point_size = point_size  # Set point size
             scene.scene.add_geometry(name, obj, mat)
             self.__geometry_container[name] = obj
         else:

@@ -98,7 +98,7 @@ background-color: rgb(212, 212, 212);</string>
       <string>Select</string>
      </property>
     </widget>
-    <widget class="QPushButton" name="btn_stop_simulation_2">
+    <widget class="QPushButton" name="btn_load_pcd">
      <property name="geometry">
       <rect>
        <x>665</x>
