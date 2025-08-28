@@ -215,7 +215,7 @@ class AppWindow(QMainWindow):
     def on_slide_control_update(self, value, joint:str):
         slider = self.sender()
         self.findChild(QLineEdit, f"edit_{slider.objectName()}").setText(str(value/JOINT_ANGLE_SCALE_FACTOR))
-        self.__call(socket=self.__socket, function="API_set_joint_value", kwargs={"joint": joint, "value": value/JOINT_ANGLE_SCALE_FACTOR*3.14/180})
+        self.__call(socket=self.__socket, function="API_set_joint_angle", kwargs={"joint": joint, "value": value/JOINT_ANGLE_SCALE_FACTOR*3.14/180})
         self.__console.info(f"({self.__class__.__name__}) Joint {joint} value changed to {value/JOINT_ANGLE_SCALE_FACTOR*3.14/180}")
 
     def on_geometry_transform_changed(self, name: str, position: list, orientation: list):
