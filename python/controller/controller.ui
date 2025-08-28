@@ -187,7 +187,7 @@ background-color: rgb(255, 100, 100);</string>
      </font>
     </property>
     <property name="currentIndex">
-     <number>1</number>
+     <number>2</number>
     </property>
     <widget class="QWidget" name="tab">
      <attribute name="title">
@@ -1149,6 +1149,19 @@ background-color: rgb(200,200,200);</string>
       <property name="icon">
        <iconset>
         <normaloff>../resource/delete.png</normaloff>../resource/delete.png</iconset>
+      </property>
+     </widget>
+     <widget class="QTableView" name="table_geometry">
+      <property name="geometry">
+       <rect>
+        <x>5</x>
+        <y>5</y>
+        <width>771</width>
+        <height>321</height>
+       </rect>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">color: rgb(0, 0, 0);</string>
       </property>
      </widget>
     </widget>

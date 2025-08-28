@@ -251,4 +251,5 @@ class Open3DVisualizer(geometryAPI):
             self._scene.scene.add_geometry(config_floor.get("name", "floor"), floor, material)
 
         else:
-            self._scene.scene.remove_geometry(config_floor.get("name", "floor"))
+            pass
+            # self._scene.scene.remove_geometry(config_floor.get("name", "floor"))
