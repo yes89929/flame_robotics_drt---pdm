@@ -160,13 +160,19 @@ class geometryAPI:
             # Compute forward kinematics
             fk = robot.visual_trimesh_fk(cfg=cfg)
             
+            # Store original mesh data for efficient updates
+            original_meshes = []
+            for tm, T in fk.items():
+                original_meshes.append((tm.copy(), T))
+            
             # Store URDF model info for potential updates
             self.__geometry_container[name] = {
                 'type': 'urdf',
                 'robot': robot,
                 'base_transform': base_T,
                 'joint_config': cfg if cfg else {},
-                'mesh_count': len(fk)
+                'mesh_count': len(fk),
+                'original_meshes': original_meshes
             }
             
             # Add each mesh to the scene
@@ -194,5 +200,208 @@ class geometryAPI:
             
         except Exception as e:
             self.__console.error(f"Failed to add URDF {name}: {e}")
+
+    def API_set_joint_angles(self, scene, name: str, joint_angles: list):
+        """Set joint angles for URDF robot model and update visualization"""
+        self.__console.debug(f"Call API_set_joint_angles : {name} with angles {joint_angles}")
+        
+        if name not in self.__geometry_container:
+            self.__console.error(f"URDF model {name} not found in geometry container")
+            return
+        
+        urdf_info = self.__geometry_container[name]
+        if urdf_info.get('type') != 'urdf':
+            self.__console.error(f"Geometry {name} is not a URDF model")
+            return
+        
+        try:
+            robot = urdf_info['robot']
+            base_T = urdf_info['base_transform']
+            
+            # Get actuated joint names from robot
+            joint_names = list(robot.actuated_joint_names)
+            
+            # Create joint configuration dictionary
+            cfg = {}
+            for i, joint_name in enumerate(joint_names):
+                if i < len(joint_angles):
+                    cfg[joint_name] = joint_angles[i]
+                else:
+                    cfg[joint_name] = 0.0  # Default to 0 if not enough angles provided
+            
+            # Update stored joint configuration
+            urdf_info['joint_config'] = cfg
+            
+            # Compute forward kinematics with new joint angles
+            fk = robot.visual_trimesh_fk(cfg=cfg)
+            
+            # Update meshes using stored original data
+            original_meshes = urdf_info['original_meshes']
+            
+            for i, (original_tm, original_T) in enumerate(original_meshes):
+                mesh_name = f"{name}_{i+1}"
+                
+                # Get new transform from forward kinematics
+                fk_list = list(fk.items())
+                if i < len(fk_list):
+                    new_tm, new_T = fk_list[i]
+                    
+                    # Apply new transform to original mesh
+                    tm_copy = original_tm.copy()
+                    tm_copy.apply_transform(base_T @ new_T)
+                    
+                    # Update Open3D mesh vertices directly
+                    new_vertices = tm_copy.vertices
+                    
+                    # Get existing geometry and update vertices
+                    try:
+                        # Remove and re-add with updated vertices (most reliable method)
+                        scene.scene.remove_geometry(mesh_name)
+                        
+                        # Convert updated trimesh to Open3D mesh
+                        o3d_mesh = o3d.geometry.TriangleMesh()
+                        o3d_mesh.vertices = o3d.utility.Vector3dVector(new_vertices)
+                        o3d_mesh.triangles = o3d.utility.Vector3iVector(tm_copy.faces)
+                        o3d_mesh.compute_vertex_normals()
+                        
+                        # Create material
+                        material = rendering.MaterialRecord()
+                        material.shader = "defaultLit"
+                        
+                        # Add back to scene
+                        scene.scene.add_geometry(mesh_name, o3d_mesh, material)
+                    except:
+                        # Fallback: create new mesh if doesn't exist
+                        o3d_mesh = o3d.geometry.TriangleMesh()
+                        o3d_mesh.vertices = o3d.utility.Vector3dVector(new_vertices)
+                        o3d_mesh.triangles = o3d.utility.Vector3iVector(tm_copy.faces)
+                        o3d_mesh.compute_vertex_normals()
+                        
+                        material = rendering.MaterialRecord()
+                        material.shader = "defaultLit"
+                        
+                        scene.scene.add_geometry(mesh_name, o3d_mesh, material)
+            
+            # Update mesh count in container
+            urdf_info['mesh_count'] = len(fk)
+            
+            self.__console.debug(f"Updated URDF {name} with {len(fk)} meshes using joint angles {joint_angles}")
+            
+        except Exception as e:
+            self.__console.error(f"Failed to set joint angles for URDF {name}: {e}")
+    
+    def API_set_joint_value(self, scene, joint: str, value: float):
+        """Set individual joint value for URDF robot model and update visualization"""
+        self.__console.debug(f"Call API_set_joint_value : joint={joint}, value={value}")
+        
+        # Find URDF model that contains this joint
+        urdf_name = None
+        urdf_info = None
+        
+        for name, info in self.__geometry_container.items():
+            if info.get('type') == 'urdf':
+                robot = info['robot']
+                if joint in robot.actuated_joint_names:
+                    urdf_name = name
+                    urdf_info = info
+                    break
+        
+        if urdf_name is None:
+            self.__console.warning(f"Joint {joint} not found in any loaded URDF models")
+            return
+        
+        try:
+            robot = urdf_info['robot']
+            base_T = urdf_info['base_transform']
+            
+            # Get current joint configuration or initialize if not exists
+            current_cfg = urdf_info.get('joint_config', {})
+            
+            # Update the specific joint value
+            current_cfg[joint] = value
+            
+            # Ensure all actuated joints have values (default to 0.0 if not set)
+            for joint_name in robot.actuated_joint_names:
+                if joint_name not in current_cfg:
+                    current_cfg[joint_name] = 0.0
+            
+            # Update stored joint configuration
+            urdf_info['joint_config'] = current_cfg
+            
+            # Compute forward kinematics with updated joint configuration
+            fk = robot.visual_trimesh_fk(cfg=current_cfg)
+            
+            # Update meshes using stored original data
+            original_meshes = urdf_info['original_meshes']
+            
+            for i, (original_tm, original_T) in enumerate(original_meshes):
+                mesh_name = f"{urdf_name}_{i+1}"
+                
+                # Get new transform from forward kinematics
+                fk_list = list(fk.items())
+                if i < len(fk_list):
+                    new_tm, new_T = fk_list[i]
+                    
+                    # Apply new transform to original mesh
+                    tm_copy = original_tm.copy()
+                    tm_copy.apply_transform(base_T @ new_T)
+                    
+                    # Update Open3D mesh vertices directly
+                    new_vertices = tm_copy.vertices
+                    
+                    # Get existing geometry and update vertices
+                    try:
+                        print(f"remove & add geometry {mesh_name}")
+                        # Remove and re-add with updated vertices (most reliable method)
+                        scene.scene.remove_geometry(mesh_name)
+                        
+                        # Convert updated trimesh to Open3D mesh
+                        o3d_mesh = o3d.geometry.TriangleMesh()
+                        o3d_mesh.vertices = o3d.utility.Vector3dVector(new_vertices)
+                        o3d_mesh.triangles = o3d.utility.Vector3iVector(tm_copy.faces)
+                        o3d_mesh.compute_vertex_normals()
+                        
+                        # Create material
+                        material = rendering.MaterialRecord()
+                        material.shader = "defaultLit"
+                        
+                        # Add back to scene
+                        scene.scene.add_geometry(mesh_name, o3d_mesh, material)
+                    except:
+                        # Fallback: create new mesh if doesn't exist
+                        o3d_mesh = o3d.geometry.TriangleMesh()
+                        o3d_mesh.vertices = o3d.utility.Vector3dVector(new_vertices)
+                        o3d_mesh.triangles = o3d.utility.Vector3iVector(tm_copy.faces)
+                        o3d_mesh.compute_vertex_normals()
+                        
+                        material = rendering.MaterialRecord()
+                        material.shader = "defaultLit"
+                        
+                        scene.scene.add_geometry(mesh_name, o3d_mesh, material)
+            
+            # Update mesh count in container
+            urdf_info['mesh_count'] = len(fk)
+            
+            self.__console.debug(f"Updated URDF {urdf_name} joint {joint} to {value} radians")
+            
+        except Exception as e:
+            self.__console.error(f"Failed to set joint value for {joint}: {e}")
+    
+    def _remove_urdf_geometry(self, scene, name: str):
+        """Remove all geometry associated with a URDF model"""
+        if name not in self.__geometry_container:
+            return
+        
+        urdf_info = self.__geometry_container[name]
+        mesh_count = urdf_info.get('mesh_count', 0)
+        
+        # Remove all meshes associated with this URDF
+        for i in range(1, mesh_count + 1):
+            mesh_name = f"{name}_{i}"
+            try:
+                scene.scene.remove_geometry(mesh_name)
+            except:
+                # Mesh might not exist, continue
+                pass
 
     

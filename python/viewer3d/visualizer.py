@@ -94,9 +94,6 @@ class Open3DVisualizer(geometryAPI):
         """Callback function for zpipe data reception"""
         try:
             if len(multipart_data) >= 2:
-                topic = multipart_data[0]
-                msg = multipart_data[1]
-                
                 self.__zpipe_msg_process(multipart_data)
         except Exception as e:
             self.__console.error(f"({self.__class__.__name__}) Error processing received data: {e}")
