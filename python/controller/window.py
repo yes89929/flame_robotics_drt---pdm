@@ -202,7 +202,8 @@ class AppWindow(QMainWindow):
         self.__console.info(f"({self.__class__.__name__}) Stop Simulation")
 
     def on_btn_geometry_remove_all(self):
-        """ Clear all geometry """
+        """ Clear all geometry """ 
+        
         self.__console.info(f"({self.__class__.__name__}) Clear all geometry")
         
         # Clear geometry table
