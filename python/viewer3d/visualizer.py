@@ -196,35 +196,14 @@ class Open3DVisualizer(geometryAPI):
                 self.__console.debug(f"Loading URDF {name} from {urdf_file}")
 
                 # load Robot URDF Model
-                robot = URDF.load(urdf_file, lazy_load_meshes=True) # load URDF Model
+                robot = URDF.load(urdf_file, lazy_load_meshes=True)
 
-                # change Model Base Origin
-                base_p = np.array(urdf.get("base", [0.0, 0.0, 0.0])[0:3])
-                base_R = rotations.matrix_from_euler(np.deg2rad(np.array(urdf.get("base", [0.0, 0.0, 0.0])[3:6])), 0, 1, 2, True)
-                base_T = transformations.transform_from(base_R, base_p)
+                # Get base position and orientation from config
+                base_pos = urdf.get("base", [0.0, 0.0, 0.0])[0:3]
+                base_ori = np.deg2rad(np.array(urdf.get("base", [0.0, 0.0, 0.0])[3:6]))
 
-                fk = robot.visual_trimesh_fk(cfg=None)
-
-                meshes = []
-                a = 1
-                for tm, T in fk.items():
-                    
-                    tm_copy = tm.copy()
-                    tm_copy.apply_transform(base_T@T)
-
-                    # convert trimesh to Open3D mesh
-                    o3d_mesh = o3d.geometry.TriangleMesh()
-                    o3d_mesh.vertices = o3d.utility.Vector3dVector(tm_copy.vertices)
-                    o3d_mesh.triangles = o3d.utility.Vector3iVector(tm_copy.faces)
-                    o3d_mesh.compute_vertex_normals()
-
-                    
-                    material = rendering.MaterialRecord()
-                    material.shader = "defaultLit"
-                    #material.base_color = [1, 0, 0, 1]  # RGBA
-
-                    self._scene.scene.add_geometry(f"{name}_{a}", o3d_mesh, material)
-                    a = a+1
+                # Use API_add_urdf to add the robot to the scene
+                self.API_add_urdf(self._scene, name, robot, base_pos, base_ori)
         else:
             pass
 

@@ -138,4 +138,61 @@ class geometryAPI:
         scene.scene.set_geometry_transform(name, transform_matrix)
         self.__console.debug(f"Updated geometry {name} using fallback method with set_geometry_transform")
 
+    def API_add_urdf(self, scene, name: str, robot, base_pos: list = [0, 0, 0], base_ori: list = [0, 0, 0], joint_config: dict = None):
+        """Add URDF robot model to scene"""
+        self.__console.debug(f"Call API_add_urdf : {name}")
+        
+        try:
+            # Import required modules
+            from scipy.spatial import transform as rotations
+            from scipy.spatial import transform as transformations
+            
+            # Create base transformation matrix
+            base_p = np.array(base_pos)
+            base_R = rotations.Rotation.from_euler('xyz', base_ori).as_matrix()
+            base_T = np.eye(4)
+            base_T[:3, :3] = base_R
+            base_T[:3, 3] = base_p
+            
+            # Use provided joint configuration or default to None (zero angles)
+            cfg = joint_config if joint_config is not None else None
+            
+            # Compute forward kinematics
+            fk = robot.visual_trimesh_fk(cfg=cfg)
+            
+            # Store URDF model info for potential updates
+            self.__geometry_container[name] = {
+                'type': 'urdf',
+                'robot': robot,
+                'base_transform': base_T,
+                'joint_config': cfg if cfg else {},
+                'mesh_count': len(fk)
+            }
+            
+            # Add each mesh to the scene
+            mesh_count = 1
+            for tm, T in fk.items():
+                tm_copy = tm.copy()
+                tm_copy.apply_transform(base_T @ T)
+                
+                # Convert trimesh to Open3D mesh
+                o3d_mesh = o3d.geometry.TriangleMesh()
+                o3d_mesh.vertices = o3d.utility.Vector3dVector(tm_copy.vertices)
+                o3d_mesh.triangles = o3d.utility.Vector3iVector(tm_copy.faces)
+                o3d_mesh.compute_vertex_normals()
+                
+                # Create material
+                material = rendering.MaterialRecord()
+                material.shader = "defaultLit"
+                
+                # Add to scene with unique name
+                mesh_name = f"{name}_{mesh_count}"
+                scene.scene.add_geometry(mesh_name, o3d_mesh, material)
+                mesh_count += 1
+            
+            self.__console.debug(f"Added URDF {name} with {len(fk)} meshes to scene")
+            
+        except Exception as e:
+            self.__console.error(f"Failed to add URDF {name}: {e}")
+
     
