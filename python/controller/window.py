@@ -23,13 +23,14 @@ import numpy as np
 import math
 from functools import partial
 
-
-from util.logger.console import ConsoleLogger
-from common.urdf_parser import URDFParser
 from common.zpipe import AsyncZSocket, ZPipe
+from common.urdf_parser import URDFParser
+from util.logger.console import ConsoleLogger
+from .geometry_model import GeometryTableModel  # geometry model handling
 
-# global variable
-scale_factor = 1000
+""" Global variables """
+# DO not change this value unless necessary
+JOINT_ANGLE_SCALE_FACTOR = 1000
 
 
 class AppWindow(QMainWindow):
@@ -37,17 +38,21 @@ class AppWindow(QMainWindow):
         """ initialization """
         super().__init__()
         
-        self.__console = ConsoleLogger.get_logger() # logger
-        self.__config = config  # copy configuration data
+        self.__console = ConsoleLogger.get_logger()
+        self.__config = config
+
+        # Initialize geometry table model
+        self.__geometry_model = GeometryTableModel()
 
         try:            
             if "gui" in config:
+                # load UI
                 ui_path = pathlib.Path(config["app_path"]) / config["gui"]
                 if os.path.isfile(ui_path):
                     loadUi(ui_path, self)
                     self.setWindowTitle(config.get("window_title", "DRT Control Window"))
 
-                    # create & join asynczsocket
+                    # Create socket for communication (as server)
                     self.__socket = AsyncZSocket("Controller", "publish")
                     if self.__socket.create(pipeline=zpipe):
                         transport = config.get("transport", "tcp")
@@ -55,11 +60,11 @@ class AppWindow(QMainWindow):
                         host = config.get("host", "localhost")
                         if self.__socket.join(transport, host, port):
                             self.__socket.set_message_callback(self.__on_data_received)
-                            self.__console.debug(f"Socket created and joined: {transport}://{host}:{port}")
+                            self.__console.debug(f"Socket created : {transport}://{host}:{port}")
                         else:
-                            self.__console.error("Failed to join socket")
+                            self.__console.error("Failed to join AsyncZsocket")
                     else:
-                        self.__console.error("Failed to create socket")
+                        self.__console.error("Failed to create AsyncZsocket")
 
                     # Initialize URDF parser and joint limits
                     self.urdf_parser = None
@@ -87,7 +92,14 @@ class AppWindow(QMainWindow):
                     # Initialize sliders with URDF joint limits
                     self._setup_sliders(dda_side_joint_limits=_dda_joint_limits, rt_side_joint_limits=_rt_joint_limits)
 
-                    # button actions
+                    # Setup geometry table
+                    self.table_geometry.setModel(self.__geometry_model)
+                    self.__geometry_model.geometryTransformChanged.connect(self.on_geometry_transform_changed)
+                    
+                    # Enable delete key functionality for geometry table
+                    self.table_geometry.keyPressEvent = self.on_geometry_table_key_press
+                    
+                    # Button events
                     self.btn_open_pcd.clicked.connect(self.on_open_pcd)
                     self.btn_load_pcd.clicked.connect(self.on_load_pcd)
                     self.btn_run_simulation.clicked.connect(self.on_run_simulation)
@@ -165,7 +177,13 @@ class AppWindow(QMainWindow):
         """ Load PCD file """
         self.__console.info(f"({self.__class__.__name__}) Loading PCD file")
         pcd_file = self.edit_pcd_file.text()
-        self.__call(socket=self.__socket, function="API_add_pcd", kwargs={"name":os.path.basename(pcd_file), "path":pcd_file, "pos":[0.0, 0.0, 0.0], "point_size":0.2})
+        pcd_name = os.path.basename(pcd_file)
+        
+        # Add to geometry table
+        self.__geometry_model.add_geometry(pcd_name, pos=[0.0, 0.0, 0.0], ori=[0.0, 0.0, 0.0], geometry_type="pcd")
+        
+        # Send to visualizer
+        self.__call(socket=self.__socket, function="API_add_pcd", kwargs={"name":pcd_name, "path":pcd_file, "pos":[0.0, 0.0, 0.0], "point_size":0.2})
     
 
     def on_run_simulation(self):
@@ -180,13 +198,41 @@ class AppWindow(QMainWindow):
     def on_btn_geometry_remove_all(self):
         """ Clear all geometry """
         self.__console.info(f"({self.__class__.__name__}) Clear all geometry")
+        
+        # Clear geometry table
+        self.__geometry_model.clear_all_geometry()
+        
+        # Send to visualizer
         self.__call(socket=self.__socket, function="API_clear_all_geometry", kwargs={})
 
     def on_slide_control_update(self, value, joint:str):
         slider = self.sender()
-        self.findChild(QLineEdit, f"edit_{slider.objectName()}").setText(str(value/scale_factor))
-        self.__call(socket=self.__socket, function="API_set_joint_value", kwargs={"joint": joint, "value": value/scale_factor})
+        self.findChild(QLineEdit, f"edit_{slider.objectName()}").setText(str(value/JOINT_ANGLE_SCALE_FACTOR))
+        self.__call(socket=self.__socket, function="API_set_joint_value", kwargs={"joint": joint, "value": value/JOINT_ANGLE_SCALE_FACTOR})
         #self.__socket.dispatch([json.dumps({"function": "API_set_rt_gx", "kwargs": {"value": value}})])
+
+    def on_geometry_transform_changed(self, name: str, position: list, orientation: list):
+        """Handle geometry transform changes from table"""
+        self.__console.info(f"Geometry {name} transform changed: pos={position}, ori={orientation}")
+        self.__call(socket=self.__socket, function="API_update_geometry_transform", kwargs={"name": name, "pos": position, "ori": orientation})
+
+    def on_geometry_table_key_press(self, event):
+        """Handle key press events for geometry table"""
+        from PyQt6.QtCore import Qt
+        
+        if event.key() == Qt.Key.Key_Delete:
+            # Get selected indexes
+            selected_indexes = self.table_geometry.selectionModel().selectedIndexes()
+            if selected_indexes:
+                # Delete from model and get deleted names
+                deleted_names = self.__geometry_model.delete_selected_geometry(selected_indexes)
+                for name in deleted_names:
+                    self.__call(socket=self.__socket, function="API_remove_geometry", kwargs={"name": name})
+                
+                self.__console.info(f"Deleted {len(deleted_names)} geometry objects")
+        else:
+            # Call the original keyPressEvent for other keys
+            super(type(self.table_geometry), self.table_geometry).keyPressEvent(event)
 
     def _setup_sliders(self, dda_side_joint_limits:dict, rt_side_joint_limits:dict):
         """Setup sliders with URDF joint limits"""
@@ -207,8 +253,8 @@ class AppWindow(QMainWindow):
                 
 
                 limits = rt_side_joint_limits[label.text()]
-                lower_deg = int(limits['lower'] * 180 / 3.14)*scale_factor
-                upper_deg = int(limits['upper'] * 180 / 3.14)*scale_factor
+                lower_deg = int(limits['lower'] * 180 / 3.14)*JOINT_ANGLE_SCALE_FACTOR
+                upper_deg = int(limits['upper'] * 180 / 3.14)*JOINT_ANGLE_SCALE_FACTOR
                 slider.setRange(lower_deg, upper_deg)
                 slider.setValue(0)
                 self.findChild(QLineEdit, f"edit_{slider.objectName()}").setText(str(0))
@@ -230,8 +276,8 @@ class AppWindow(QMainWindow):
                 slider.valueChanged.connect(lambda v: self.on_slide_control_update(v, key))
 
                 limits = dda_side_joint_limits[label.text()]
-                lower_deg = int(limits['lower'] * 180 / 3.14)*scale_factor
-                upper_deg = int(limits['upper'] * 180 / 3.14)*scale_factor
+                lower_deg = int(limits['lower'] * 180 / 3.14)*JOINT_ANGLE_SCALE_FACTOR
+                upper_deg = int(limits['upper'] * 180 / 3.14)*JOINT_ANGLE_SCALE_FACTOR
                 slider.setRange(lower_deg, upper_deg)
                 slider.setValue(0)
                 self.findChild(QLineEdit, f"edit_{slider.objectName()}").setText(str(0))
@@ -251,6 +297,7 @@ class AppWindow(QMainWindow):
             self.__console.info(f"Selected 3D model file: {model_file}")
         
     def __call(self, socket, function:str, kwargs:dict):
+        """ call function via zpipe to others"""
         try:
             topic = "call"
             message = { "function":function,"kwargs":kwargs}
