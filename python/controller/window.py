@@ -214,8 +214,8 @@ class AppWindow(QMainWindow):
     def on_slide_control_update(self, value, joint:str):
         slider = self.sender()
         self.findChild(QLineEdit, f"edit_{slider.objectName()}").setText(str(value/JOINT_ANGLE_SCALE_FACTOR))
-        self.__call(socket=self.__socket, function="API_set_joint_value", kwargs={"joint": joint, "value": value/JOINT_ANGLE_SCALE_FACTOR})
-        #self.__socket.dispatch([json.dumps({"function": "API_set_rt_gx", "kwargs": {"value": value}})])
+        self.__call(socket=self.__socket, function="API_set_joint_value", kwargs={"joint": joint, "value": value/JOINT_ANGLE_SCALE_FACTOR*3.14/180})
+        self.__console.info(f"({self.__class__.__name__}) Joint {joint} value changed to {value/JOINT_ANGLE_SCALE_FACTOR*3.14/180}")
 
     def on_geometry_transform_changed(self, name: str, position: list, orientation: list):
         """Handle geometry transform changes from table"""
@@ -279,7 +279,8 @@ class AppWindow(QMainWindow):
             for label, key in zip(dda_labels, dda_side_joint_limits.keys()):
                 label.setText(key)
             for label, slider, key in zip(dda_labels, dda_sliders, dda_side_joint_limits.keys()):
-                slider.valueChanged.connect(lambda v: self.on_slide_control_update(v, key))
+                # slider.valueChanged.connect(lambda v: self.on_slide_control_update(v, key))
+                slider.valueChanged.connect(partial(self.on_slide_control_update, joint=key))
 
                 limits = dda_side_joint_limits[label.text()]
                 lower_deg = int(limits['lower'] * 180 / 3.14)*JOINT_ANGLE_SCALE_FACTOR
