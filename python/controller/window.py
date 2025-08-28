@@ -111,6 +111,28 @@ class AppWindow(QMainWindow):
                 
         except Exception as e:
             self.__console.error(f"{e}")
+    
+    def closeEvent(self, event):
+        """Handle window close event"""
+        try:
+            # Clear all geometry in viewer3d before closing
+            self.__console.info("Clearing all geometry before closing controller window")
+            self.__call(socket=self.__socket, function="API_clear_all_geometry", kwargs={})
+            
+            # Clear geometry table model
+            self.__geometry_model.clear_all_geometry()
+            
+            # Close socket connection
+            if hasattr(self, '_AppWindow__socket') and self.__socket:
+                self.__socket.destroy_socket()
+                self.__console.debug("Controller socket destroyed")
+                
+        except Exception as e:
+            self.__console.error(f"Error during window close: {e}")
+        finally:
+            # Accept the close event
+            event.accept()
+            self.__console.info("Controller window closed")
 
     def __on_data_received(self, multipart_data):
         """Callback function for zpipe data reception"""
@@ -124,45 +146,29 @@ class AppWindow(QMainWindow):
             self.__console.error(f"({self.__class__.__name__}) Error processing received data: {e}")
 
     
-    # def zmq_recv_process(self, stop_event):
-    #     """ zmq pipeline process for receiving data """
 
-    #     poller = zmq.Poller()
-    #     poller.register(self._socket_sub, zmq.POLLIN)
-        
-    #     while not stop_event.is_set():
-    #         try:
-    #             events = dict(poller.poll(1000)) # wait 1 sec
-    #             if self._socket_sub in events:
-    #                 if events[self._socket_sub] == zmq.POLLIN:
-    #                     # for 'call' topic
-    #                     topic, msg = self._socket_sub.recv_multipart()
-    #                     if topic.decode() == "call":
-    #                         data = json.loads(msg.decode('utf8').replace("'", '"'))
-    #                         print(f"recv : {data}")
-                
-    #         except json.JSONDecodeError as e:
-    #             print(f"[Graphic 3D Window] {e}")
-    #             continue
-    #         except zmq.ZMQError as e:
-    #             print(f"[Graphic 3D Window] {e}")
-    #             break
-    #         except Exception as e:
-    #             print(f"[Graphic 3D Window] {e}")
-    #             break
-
-    #     poller.unregister(self._socket_sub)
 
     
     def closeEvent(self, event:QCloseEvent) -> None:
         """ Handle close event """
-         # Clean up subscriber socket first
-        if hasattr(self, '_AppWindow__socket') and self.__socket:
-            self.__socket.destroy_socket()
-            self.__console.debug(f"({self.__class__.__name__}) Destroyed socket")
+        try:
+            # Clear all geometry in viewer3d before closing
+            self.__console.info("Clearing all geometry before closing controller window")
+            self.__call(socket=self.__socket, function="API_clear_all_geometry", kwargs={})
 
-        self.__console.info("Successfully Closed")
-        return super().closeEvent(event)
+            # Clear geometry table model
+            self.__geometry_model.clear_all_geometry()
+
+            # Clean up subscriber socket first
+            if hasattr(self, '_AppWindow__socket') and self.__socket:
+                self.__socket.destroy_socket()
+                self.__console.debug(f"({self.__class__.__name__}) Destroyed socket")
+
+        except Exception as e:
+            self.__console.error(f"Error during window close: {e}")
+        finally:
+            self.__console.info("Successfully Closed")
+            return super().closeEvent(event)
     
     def on_open_pcd(self):
         """ Open PCD file dialog """
