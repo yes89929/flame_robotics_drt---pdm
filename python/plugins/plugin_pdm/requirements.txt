@@ -1,0 +1,8 @@
+open3d
+numpy
+urdfdom_py
+scikit-learn
+# 노트북에서 점군 가시화-----------------------------------------------------------
+pyvista[all, trame]
+ipympl
+ipywidgets
