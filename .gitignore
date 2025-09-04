@@ -163,3 +163,10 @@ cython_debug/
 *.ply
 *.pcd
 /sample
+
+# plugin_pdm
+data
+test_code
+.vscode
+typings
+.github
