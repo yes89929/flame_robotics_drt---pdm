@@ -7,6 +7,7 @@ from urdf_parser_py.urdf import URDF
 from pathlib import Path
 from scipy.spatial.transform import Rotation as R
 import json
+import copy
 
 
 class EndEffectorPoseOptimizer:
@@ -136,15 +137,29 @@ class EndEffectorPoseOptimizer:
             num_candidates,
         )
 
-        # todo: 배관과 충돌하는 후보 제거------------------------------------------
+        # 배관과 충돌하는 후보 제거------------------------------------------------
+        mask = []
+        for i in range(len(dda_tcp_pose_candidates)):
+            is_collision = self.__check_collision(
+                self.__dda_mesh,
+                dda_tcp_pose_candidates[i],
+                self.__dda_invers_transform_mat,
+            )
+            mask.append(not is_collision)
+
+        dda_pose_candidates_filtered = dda_tcp_pose_candidates[mask]
+
         # 출력------------------------------------------------------------------
         # JSON 형태: [ {dda: [x,y,z,r,p,y]}, ... ]
         pose_list = []
-        for row in dda_pose_candidates:
+        for row in dda_pose_candidates_filtered:
             pose_list.append({"dda": row.tolist()})
-        return json.dumps(pose_list), dda_pose_candidates
 
-    def __calculate_pipe_profile(
+        dda_candidates_filtered_json = json.dumps(pose_list)
+
+        return dda_candidates_filtered_json, dda_pose_candidates_filtered, dda_tcp_pose_candidates
+
+    def calculate_pipe_profile(
         self,
         target_point: tuple[float, float, float] | np.ndarray,  # x,y,z
     ) -> None:
@@ -367,3 +382,52 @@ class EndEffectorPoseOptimizer:
             clusters.append(current_cluster)
         # ----------------------------------------------------------------------
         return clusters
+
+    def __check_collision(
+        self,
+        link_model: o3d.geometry.TriangleMesh,
+        tcp_pose: np.ndarray,
+        tcp_to_link_pose_T: np.ndarray,
+        margin: float = 0.05,
+        sample_count: int = 5000,
+    ) -> bool:
+        """
+        메쉬(변환된)와 로드된 스캔 점군 데이터 간 충돌 여부 검사
+
+        :param mesh: 검사할 TriangleMesh
+        :param mesh_pose: array(6) [x, y, z, roll, pitch, yaw] (라디안)
+        :return: 충돌 시 True
+        """
+        # 엔드이펙터를 검사 대상 위치로 이동-----------------------------------------
+        tcp_pose_T = np.eye(4)
+        tcp_pose_T[:3, :3] = R.from_euler("xyz", tcp_pose[3:]).as_matrix()
+        tcp_pose_T[:3, 3] = tcp_pose[:3]
+
+        link_pose_T = tcp_pose_T @ tcp_to_link_pose_T
+
+        mesh_copy = copy.deepcopy(link_model)
+        mesh_copy.transform(link_pose_T)  # type: ignore
+
+        # 연산량을 줄이기 위해 스캔 데이터 필터링-------------------------------------
+        # 엔드이펙터의 바운딩 박스 계산
+        aabb = mesh_copy.get_axis_aligned_bounding_box()
+
+        # 바운딩 박스에 마진 추가
+        margin_vec = np.array([margin, margin, margin])
+        min_b = aabb.min_bound - margin_vec
+        max_b = aabb.max_bound + margin_vec
+        crop_box = o3d.geometry.AxisAlignedBoundingBox(min_b, max_b)  # type: ignore
+
+        # 바운딩 박스 내 점 추출
+        idx = crop_box.get_point_indices_within_bounding_box(self._scan_data.points)
+        if not idx:
+            return False
+        sub_pcd = self._scan_data.select_by_index(idx)
+
+        # 엔드이펙터 표면 점 추출--------------------------------------------------
+        mesh_pcd = mesh_copy.sample_points_uniformly(number_of_points=sample_count)
+
+        # 점들간 거리 계산으로 충돌 여부 확인----------------------------------------
+        distances = sub_pcd.compute_point_cloud_distance(mesh_pcd)
+        threshold = 0.001
+        return any(d <= threshold for d in distances)
