@@ -20,11 +20,10 @@ class EndEffectorPoseOptimizer:
     _dda_to_tcp_pose_rpy: list[float]
 
     # rt 정보
-    _rt_geometry_file_path: Path
-    _rt_geometry_scale: float
-    _rt_mesh: o3d.geometry.TriangleMesh
-    _rt_to_tcp_pose_xyz: list[float]
-    _rt_to_tcp_pose_rpy: list[float]
+    # 파이프 프로파일 정보
+    __pipe_direction: np.ndarray
+    __pipe_center: np.ndarray
+    __pipe_radius: float
 
     def __init__(self):
         pass
@@ -43,15 +42,16 @@ class EndEffectorPoseOptimizer:
     def calculate_DDA_pose_for_detecting_welding_point(
         self,
         target_point: tuple[float, float, float],  # x,y,z
-        num_candidates: int = 8,  # number of pose candidates
+        num_candidates: int = 8,
+        distance: float = 0.3,
     ):
         """
         용접부 탐색을 위한 DDA 자세 후보 계산
-        1. 직배관 위 한점을 기준으로 직배관 프로파일 인식
-        2. 다음 조건을 만족하는 DDA 자세 후보 계산
+
+        DDA 자세 후보 조건
             - TCP의 X축이 배관 중심을 향함
             - TCP의 Y축이 배관 길이 방향과 평행
-            - 배관 표면에서 30cm 거리에 위치
+            - 배관 표면에서 {distance} 거리에 위치
             - 배관과 충돌하지 않음
 
         :param target_point: 직배관 표면 위의 한 점
@@ -61,14 +61,10 @@ class EndEffectorPoseOptimizer:
             - JSON str: [ {dda: [x,y,z,r,p,y]}, ... ]\n
             - array: 각 행이 [x, y, z, r, p, y] 형태인 array(num_candidates, 6)
         """
-        # 직배관 프로파일 인식-----------------------------------------------------
-        direction, center, radius = self.__calculate_pipe_profile(target_point)
-
         # DDA 자세 후보 생성------------------------------------------------------
-        dda_pose_candidates = self.__calculate_dda_pose_candidate(
-            center,
-            direction,
-            radius + 0.3,
+        dda_tcp_pose_candidates = self.__calculate_dda_pose_candidate(
+            np.asarray(target_point),
+            self.__pipe_radius + distance,
             num_candidates,
         )
 
@@ -83,13 +79,11 @@ class EndEffectorPoseOptimizer:
     def __calculate_pipe_profile(
         self,
         target_point: tuple[float, float, float] | np.ndarray,  # x,y,z
-    ) -> tuple[np.ndarray, np.ndarray, float]:
+    ) -> None:
         """
-        직배관의 프로파일(방향벡터, 중심점, 반지름) 계산
+        직배관의 프로파일(방향벡터, 중심점, 반지름) 계산하여 멤버변수에 저장
 
         :param target_point: 직배관 표면 위의 한 점
-
-        :return: 직배관의 방향벡터, 중심점, 반지름
         """
         # 검사 대상 주변 미소 점군 추출---------------------------------------------
         if not isinstance(target_point, np.ndarray):
@@ -137,40 +131,48 @@ class EndEffectorPoseOptimizer:
         points_in_sphere = self.__extract_points_in_sphere(
             np.asarray(self._scan_data.points),
             estimated_center,
-            estimated_radius + 0.05,  # 배관 지름에 따라 조절 필요
+            estimated_radius + 0.01,  # 배관 지름에 따라 조절 필요
         )
 
         # 실린더 피팅------------------------------------------------------------
         direction, center, radius, _ = fit_cylinder(points_in_sphere)
 
-        return direction, center, radius
+        # 멤버변수에 파이프 프로파일 저장-------------------------------------------
+        self.__pipe_direction = direction
+        self.__pipe_center = center
+        self.__pipe_radius = radius
 
     def __calculate_dda_pose_candidate(
         self,
-        pipe_center: np.ndarray,
-        pipe_direction: np.ndarray,
+        point_on_pipe_surface: np.ndarray,
         radius: float,
         num_candidates: int,
     ):
         """
         배관 중심에서 radius만큼 떨어지고, 배관 중심을 바라보는 DDA의 위치 및 방향 후보 계산
 
-        :param center: 직배관의 중심 좌표
-        :param normal: 직배관의 길이 방향 벡터
+        :param point_on_pipe_surface: 직배관 표면 위의 한 점
         :param radius: 직배관 중심으로 부터의 거리
         :param num_candidates: 계산할 자세 후보의 수(자세별 간격은 등간격)
         """
 
+        # 동적 중심 계산: surface point를 pipe 축 위에 투영
+        # pipe_direction 단위 벡터로 정규화
+        direction_unit = self.__pipe_direction / np.linalg.norm(self.__pipe_direction)
+        vec_to_surface = point_on_pipe_surface - self.__pipe_center
+        proj_len = np.dot(vec_to_surface, direction_unit)
+        center = self.__pipe_center + proj_len * direction_unit
+
         # 배관 축에 수직인 벡터 2개 구하기------------------------------------------
         # 배관 축에 평행하지 않는 기준 벡터 선택(x축 or y축)
         basis = np.array([1.0, 0.0, 0.0])
-        if abs(np.dot(basis, pipe_direction)) > 0.9:
+        if abs(np.dot(basis, self.__pipe_direction)) > 0.9:
             basis = np.array([0.0, 1.0, 0.0])
 
         # 수직 벡터 생성
-        v1 = np.cross(pipe_direction, basis)  # 배관 축에 수직인 벡터 v1
+        v1 = np.cross(self.__pipe_direction, basis)  # 배관 축에 수직인 벡터 v1
         v1 /= np.linalg.norm(v1)  # 길이로 나눠서 방향 벡터 계산
-        v2 = np.cross(pipe_direction, v1)  # 배관 축에 수직인 벡터 v2
+        v2 = np.cross(self.__pipe_direction, v1)  # 배관 축에 수직인 벡터 v2
         v2 /= np.linalg.norm(v2)
 
         # 위치 계산--------------------------------------------------------------
@@ -182,18 +184,18 @@ class EndEffectorPoseOptimizer:
         # v1, v2는 배관 축에 수직인 벡터, 위에서 구한 원 위의 점 좌표를 원점이 (0,0,0)이고 v1, v2로 구성된 평면위로 이동
         offsets = np.outer(cos_a, v1) + np.outer(sin_a, v2)
 
-        # 위에서 구한 원 위의 점 좌표를 직배관 중심 위치로 이동
-        positions = pipe_center + offsets * radius
+        # 투영된 중심 주변 원형 궤도상 위치 계산
+        positions = center + offsets * radius
 
         # 방향 자세--------------------------------------------------------------
         # x축 방향(배관 중심을 향함)
-        x_axis = pipe_center - positions
+        x_axis = self.__pipe_center - positions
         x_norm = np.linalg.norm(x_axis, axis=1, keepdims=True)
         x_norm[x_norm < 1e-12] = 1.0
         x_axis = x_axis / x_norm
 
         # y축 방향(배관 축과 평행)
-        y_unit = pipe_direction / np.linalg.norm(pipe_direction)
+        y_unit = self.__pipe_direction / np.linalg.norm(self.__pipe_direction)
         y_axis = np.tile(y_unit, (num_candidates, 1))
 
         # z축 방향(x축과 y축에 의해 결정됨)
