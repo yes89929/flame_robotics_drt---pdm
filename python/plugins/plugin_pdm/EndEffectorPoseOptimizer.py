@@ -13,13 +13,13 @@ class EndEffectorPoseOptimizer:
     _scan_data: PointCloud
 
     # dda 정보
-    _dda_geometry_file_path: Path
-    _dda_geometry_scale: float
-    _dda_mesh: o3d.geometry.TriangleMesh
-    _dda_to_tcp_pose_xyz: list[float]
-    _dda_to_tcp_pose_rpy: list[float]
+    __dda_mesh: o3d.geometry.TriangleMesh
+    __dda_invers_transform_mat: np.ndarray
 
     # rt 정보
+    __rt_mesh: o3d.geometry.TriangleMesh
+    __rt_invers_transform_mat: np.ndarray
+
     # 파이프 프로파일 정보
     __pipe_direction: np.ndarray
     __pipe_center: np.ndarray
@@ -38,6 +38,74 @@ class EndEffectorPoseOptimizer:
 
         # 스케일
         self._scan_data.scale(scale, np.asarray([0.0, 0.0, 0.0]))  # type: ignore
+
+    def load_DDA_from_urdf(
+        self,
+        file_path: str,
+    ):
+        self.__dda_mesh, self.__dda_invers_transform_mat = self.__extract_tcp_and_end(
+            file_path,
+            "dda_link_end",
+            "dda_joint_tcp",
+        )
+
+    def load_RT_from_urdf(
+        self,
+        file_path: str,
+    ):
+        self.__rt_mesh, self.__rt_invers_transform_mat = self.__extract_tcp_and_end(
+            file_path,
+            "rt_link_end",
+            "rt_joint_tcp",
+        )
+
+    def __extract_tcp_and_end(
+        self,
+        file_path: str,
+        end_link_name: str,
+        tcp_joint_name: str,
+    ):
+        # urdf 파일 로드---------------------------------------------------------
+        urdf: URDF = URDF.from_xml_file(file_path)
+
+        # 엔드이펙터 형상 추출-----------------------------------------------------
+        # 형상 파일 경로
+        end_geometry_file_path = urdf.link_map[end_link_name].collision.geometry.filename
+        end_geometry_file_path = (Path(file_path) / Path(end_geometry_file_path.replace("file://", "../"))).resolve()
+        link_mesh = o3d.io.read_triangle_mesh(end_geometry_file_path)
+
+        # 형상 스케일
+        end_geomtry_scale = urdf.link_map[end_link_name].collision.geometry.scale
+        if isinstance(end_geomtry_scale, list):
+            end_geomtry_scale = float(end_geomtry_scale[0])
+        elif isinstance(end_geomtry_scale, (int, float)):
+            end_geomtry_scale = float(end_geomtry_scale)
+        else:
+            raise ValueError("엔드이펙터 형상 스케일 정보가 잘못되었습니다.")
+
+        link_mesh = link_mesh.scale(end_geomtry_scale, np.zeros(3, dtype=np.float64))  # type: ignore
+
+        # 자세 변환
+        end_pose_xyz = urdf.link_map[end_link_name].collision.origin.xyz
+        end_pose_rpy = urdf.link_map[end_link_name].collision.origin.rpy
+        T = np.eye(4)
+        T[:3, :3] = R.from_euler("xyz", end_pose_rpy).as_matrix()
+        T[:3, 3] = end_pose_xyz
+        link_mesh = link_mesh.transform(T)  # type: ignore
+
+        # tcp와 엔드이펙터 형상 위치관계 정보 추출-----------------------------------
+        # end to tcp 정보 추출
+        end_to_tcp_relative_pose_xyz = urdf.joint_map[tcp_joint_name].origin.xyz
+        end_to_tcp_relative_pose_rpy = urdf.joint_map[tcp_joint_name].origin.rpy
+
+        # tcp to end 변환 행렬 계산
+        end_to_tcp_relative_pose_T = np.eye(4)
+        end_to_tcp_relative_pose_T[:3, :3] = R.from_euler("xyz", end_to_tcp_relative_pose_rpy).as_matrix()
+        end_to_tcp_relative_pose_T[:3, 3] = end_to_tcp_relative_pose_xyz
+        tcp_to_origin_mat = np.linalg.inv(end_to_tcp_relative_pose_T)
+
+        # ----------------------------------------------------------------------
+        return link_mesh, tcp_to_origin_mat
 
     def calculate_DDA_pose_for_detecting_welding_point(
         self,
