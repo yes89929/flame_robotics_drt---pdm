@@ -8,6 +8,7 @@ from pathlib import Path
 from scipy.spatial.transform import Rotation as R
 import json
 import copy
+from typing import Any
 
 
 class EndEffectorPoseOptimizer:
@@ -26,8 +27,12 @@ class EndEffectorPoseOptimizer:
     __pipe_center: np.ndarray
     __pipe_radius: float
 
-    def __init__(self):
-        pass
+    # 디버깅용
+    __is_debug_mode: bool
+    debuging_info: dict[str, Any]
+
+    def __init__(self, debug_mode: bool = False):
+        self.__is_debug_mode = debug_mode
 
     def load_scan_data(
         self,
@@ -329,12 +334,18 @@ class EndEffectorPoseOptimizer:
         indices = box.get_point_indices_within_bounding_box(self._scan_data.points)
         selected_points = self._scan_data.select_by_index(indices)
 
+        if self.__is_debug_mode:
+            self.debuging_info["selected_points"] = selected_points
+
         # 중앙 벡터 계산----------------------------------------------------------
         normals = np.asarray(selected_points.normals)
         x_m = np.median(normals[:, 0])
         y_m = np.median(normals[:, 1])
         z_m = np.median(normals[:, 2])
         normal_m = np.array([x_m, y_m, z_m])
+
+        if self.__is_debug_mode:
+            self.debuging_info["normal_m"] = normal_m
 
         # 직경 추정--------------------------------------------------------------
         # 가늘고 긴 실린더 ROI 생성 후 내부 점 추출
@@ -345,6 +356,9 @@ class EndEffectorPoseOptimizer:
             radius=0.005,  # 배관 지름에 따라 조절 필요
             height=0.3,  # 배관 직경 및 브랜치 간 거리에 따라 조절 필요
         )
+
+        if self.__is_debug_mode:
+            self.debuging_info["points_in_cylinder"] = points_in_cylinder
 
         # 중앙 벡터에 투영 후 군집화
         clusters = self.__cluster_points_along_line(
@@ -358,6 +372,10 @@ class EndEffectorPoseOptimizer:
         estimated_opposite_point = clusters[1][-1]
         estimated_center = (target_point + estimated_opposite_point) / 2
         estimated_radius = float(np.linalg.norm(estimated_opposite_point - estimated_center))
+
+        if self.__is_debug_mode:
+            self.debuging_info["estimated_center"] = estimated_center
+            self.debuging_info["estimated_radius"] = estimated_radius
 
         # 배관 중심에서 배관 점군 추출----------------------------------------------
         # 배관 중심점에서 반지름 + α 범위 내의 점 추출
