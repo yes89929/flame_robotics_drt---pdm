@@ -442,15 +442,15 @@ class EndEffectorPoseOptimizer:
         positions = center + offsets * radius
 
         # 방향 자세--------------------------------------------------------------
-        # x축 방향(배관 중심을 향함)
-        x_axis = self.__pipe_center - positions
-        x_norm = np.linalg.norm(x_axis, axis=1, keepdims=True)
-        x_norm[x_norm < 1e-12] = 1.0
-        x_axis = x_axis / x_norm
-
         # y축 방향(배관 축과 평행)
         y_unit = self.__pipe_direction / np.linalg.norm(self.__pipe_direction)
         y_axis = np.tile(y_unit, (num_candidates, 1))
+
+        # x축 방향(DDA TCP 위치에서 배관 중심을 바라보는 방향, 배관 방향과 수직)
+        x_axis = center - positions  # center는 배관 축 위의 투영된 중심점
+        x_norm = np.linalg.norm(x_axis, axis=1, keepdims=True)
+        x_norm[x_norm < 1e-12] = 1.0
+        x_axis = x_axis / x_norm
 
         # z축 방향(x축과 y축에 의해 결정됨)
         z_axis = np.cross(x_axis, y_axis)
