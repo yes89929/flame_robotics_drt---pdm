@@ -114,21 +114,24 @@ class EndEffectorPoseOptimizer:
         num_candidates: int = 8,
         distance: float = 0.3,
     ):
-        """
-        용접부 탐색을 위한 DDA 자세 후보 계산
+        """용접부 탐색을 위한 DDA 자세 후보 계산.
 
-        DDA 자세 후보 조건
+        DDA 자세 후보 조건:
             - TCP의 X축이 배관 중심을 향함
             - TCP의 Y축이 배관 길이 방향과 평행
-            - 배관 표면에서 {distance} 거리에 위치
+            - 배관 표면에서 distance 거리에 위치
             - 배관과 충돌하지 않음
 
-        :param target_point: 직배관 표면 위의 한 점
-        :param num_candidates: 계산할 자세 후보의 수(자세별 간격은 등간격)
+        Args:
+            target_point: 직배관 표면 위의 한 점.
+            num_candidates: 계산할 자세 후보의 수(자세별 간격은 등간격). Defaults to 8.
+            distance: 배관 표면으로부터의 거리. Defaults to 0.3.
 
-        :return:
-            - JSON str: [ {dda: [x,y,z,r,p,y]}, ... ]\n
-            - array: 각 행이 [x, y, z, r, p, y] 형태인 array(num_candidates, 6)
+        Returns:
+            tuple: DDA 자세 후보를 3가지 형태로 반환.
+                - JSON str: [{dda: [x,y,z,r,p,y]}, ...]
+                - filtered array: 충돌 체크를 통과한 자세 후보들
+                - all candidates array: 모든 자세 후보들
         """
         # DDA 자세 후보 생성------------------------------------------------------
         dda_tcp_pose_candidates = self.__calculate_dda_pose_candidate(
@@ -167,40 +170,33 @@ class EndEffectorPoseOptimizer:
         distance_from_dda_to_rt: float,
         angle_of_rt: float,
     ):
-        """
-        x-ray 촬영을 위한 DDA, RT 자세 후보 계산
+        """x-ray 촬영을 위한 DDA, RT 자세 후보 계산.
 
-        DDA 자세 후보 조건
+        DDA 자세 후보 조건:
             - DDA TCP의 X축이 배관 중심을 향함
             - DDA TCP의 Y축이 배관 길이 방향과 평행
-            - 배관 표면에서 {distance_from_dda_to_surface} 거리에 위치
+            - 배관 표면에서 distance_from_dda_to_surface 거리에 위치
             - 배관과 충돌하지 않음
 
-        RT 자세 후보 조건
+        RT 자세 후보 조건:
             - RT TCP의 X축이 DDA TCP의 중심을 향함
-            - DDA TCP와 RT TCP 간 거리는 {distance_from_dda_to_rt}
-            - DDA TCP X축, RT TCP X축, 배관 방향벡터가 같은 평면에 위치
-            - RT TCP의 위치는 DDA TCP를 중심으로 배관 축에 수직인 평면에서 결정됨
-            - RT TCP X축과 DDA TCP X축은 {angle_of_rt}만큼 벌어짐
+            - DDA TCP와 RT TCP 간 거리는 distance_from_dda_to_rt
+            - DDA TCP의 XY 평면과 RT TCP의 XY 평면이 일치
+            - DDA TCP의 XY 평면에서 DDA TCP의 X축과 RT TCP의 Y축이 angle_of_rt만큼 벌어짐
             - 배관과 충돌하지 않음
 
-        :param target_point: 직배관 표면 위의 한 점
-        :type target_point: tuple[float, float, float] | np.ndarray
+        Args:
+            target_point: 직배관 표면 위의 한 점.
+            num_candidates: 계산할 자세 후보의 수(자세별 간격은 등간격).
+            distance_from_dda_to_surface: DDA TCP와 배관 표면 사이의 거리 (m).
+            distance_from_dda_to_rt: DDA TCP와 RT TCP 사이의 거리 (m).
+            angle_of_rt: RT TCP X축과 DDA TCP X축 사이의 각도 (degree).
 
-        :param num_candidates: 계산할 자세 후보의 수(자세별 간격은 등간격)
-        :type num_candidates: int
-
-        :param distance_from_dda_to_surface: DDA TCP와 배관 표면 사이의 거리 (m)
-        :type distance_from_dda_to_surface: float
-
-        :param distance_from_dda_to_rt: DDA TCP와 RT TCP 사이의 거리 (m)
-        :type distance_from_dda_to_rt: float
-
-        :param angle_of_rt: RT TCP X축과 DDA TCP X축 사이의 각도 (degree)
-        :type angle_of_rt: float
-
-        :return: DDA-RT 자세 후보 쌍을 2가지 형태로 반환. json str 형식, array 형식
-        :rtype: tuple
+        Returns:
+            tuple: DDA-RT 자세 후보 쌍을 3가지 형태로 반환.
+                - JSON str 형식
+                - DDA poses array 형식
+                - RT poses array 형식
         """
 
         # DDA 자세 후보 생성------------------------------------------------------
@@ -385,12 +381,15 @@ class EndEffectorPoseOptimizer:
         radius: float,
         num_candidates: int,
     ):
-        """
-        배관 중심에서 radius만큼 떨어지고, 배관 중심을 바라보는 DDA의 위치 및 방향 후보 계산
+        """배관 중심에서 radius만큼 떨어지고, 배관 중심을 바라보는 DDA의 위치 및 방향 후보 계산.
 
-        :param point_on_pipe_surface: 직배관 표면 위의 한 점
-        :param radius: 직배관 중심으로 부터의 거리
-        :param num_candidates: 계산할 자세 후보의 수(자세별 간격은 등간격)
+        Args:
+            point_on_pipe_surface: 직배관 표면 위의 한 점.
+            radius: 직배관 중심으로부터의 거리.
+            num_candidates: 계산할 자세 후보의 수(자세별 간격은 등간격).
+
+        Returns:
+            np.ndarray: 각 행이 [x, y, z, roll, pitch, yaw] 형태인 numpy array of shape (num_candidates, 6).
         """
 
         # 동적 중심 계산: surface point를 pipe 축 위에 투영
@@ -479,6 +478,16 @@ class EndEffectorPoseOptimizer:
     def __extract_points_in_sphere(
         points: np.ndarray, sphere_center: np.ndarray | tuple, radius: float  # 점군  # 구의 중심점  # 구의 반지름
     ) -> np.ndarray:
+        """구 내부에 있는 점들을 추출.
+
+        Args:
+            points: 점군.
+            sphere_center: 구의 중심점.
+            radius: 구의 반지름.
+
+        Returns:
+            np.ndarray: 구 내부에 포함되는 점들.
+        """
         # 구에 점군 투영----------------------------------------------------------
         vec = points - sphere_center
         dists = np.linalg.norm(vec, axis=1)
@@ -497,6 +506,17 @@ class EndEffectorPoseOptimizer:
         # min_distance: float = 5,  # position으로부터 최소 거리,
         cluster_distance: float = 10,  # 군집화 기준 거리(투영값 기준)
     ) -> list[list[np.ndarray]]:
+        """직선을 따라 점들을 거리 기준으로 군집화.
+
+        Args:
+            points: 스캔 데이터의 일부.
+            origin_point_of_line: 직선의 한 점.
+            direction: 직선의 방향벡터 (단위벡터).
+            cluster_distance: 군집화 기준 거리(투영값 기준). Defaults to 10.
+
+        Returns:
+            list[list[np.ndarray]]: 군집화된 점들의 리스트.
+        """
         # 군집화 사전 준비--------------------------------------------------------
         # 투영
         shifted_points = points - origin_point_of_line  # 투영하기 위해 원점으로 이동
@@ -545,12 +565,17 @@ class EndEffectorPoseOptimizer:
         margin: float = 0.05,
         sample_count: int = 5000,
     ) -> bool:
-        """
-        메쉬(변환된)와 로드된 스캔 점군 데이터 간 충돌 여부 검사
+        """메쉬(변환된)와 로드된 스캔 점군 데이터 간 충돌 여부 검사.
 
-        :param mesh: 검사할 TriangleMesh
-        :param mesh_pose: array(6) [x, y, z, roll, pitch, yaw] (라디안)
-        :return: 충돌 시 True
+        Args:
+            link_model: 검사할 TriangleMesh.
+            tcp_pose: TCP 자세 array(6) [x, y, z, roll, pitch, yaw] (라디안).
+            tcp_to_link_pose_T: TCP에서 링크로의 변환 행렬.
+            margin: 충돌 검사 마진. Defaults to 0.05.
+            sample_count: 메쉬 샘플링 점 수. Defaults to 5000.
+
+        Returns:
+            bool: 충돌 시 True.
         """
         # 엔드이펙터를 검사 대상 위치로 이동-----------------------------------------
         tcp_pose_T = np.eye(4)
