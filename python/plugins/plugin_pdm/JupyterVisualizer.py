@@ -13,8 +13,8 @@ def visualize_pointcloud(
     points: np.ndarray,
     colors: np.ndarray | None = None,
     point_size: int = 3,
-    camera_pos: list | None = None,
     bg_color: str | tuple = ("white", "gray"),
+    plotter: Plotter | None = None,
 ) -> Plotter:
     pv_data = pv.PolyData(points)
 
@@ -26,10 +26,13 @@ def visualize_pointcloud(
         rgb = True
 
     # Determine the grid layout based on the camera_pos
-    grid_layout = (1, 1) if camera_pos is None or len(camera_pos) == 1 else (int(len(camera_pos) / 2 + 0.5), 2)
+    # grid_layout = (1, 1) if camera_pos is None or len(camera_pos) == 1 else (int(len(camera_pos) / 2 + 0.5), 2)
 
     # Create a plotter with the specified grid layout
-    pl = Plotter(shape=grid_layout)
+    if plotter is not None:
+        pl = plotter
+    else:
+        pl = Plotter()
 
     if isinstance(bg_color, tuple):
         if len(bg_color) == 2:
@@ -39,16 +42,9 @@ def visualize_pointcloud(
     else:
         pl.set_background(bg_color)  # type: ignore
 
-    for i in range(grid_layout[0] * grid_layout[1]):
-        # Add the mesh to the subplot
-        pl.subplot(i // grid_layout[1], i % grid_layout[1])
-        if pv_data is not None:
-            pl.add_mesh(pv_data, scalars=scalars, rgb=rgb, point_size=point_size)
-        pl.camera.parallel_projection = True
-
-        # Set the camera position if provided
-        if camera_pos is not None and i < len(camera_pos):
-            pl.camera_position = camera_pos[i]
+    if pv_data is not None:
+        pl.add_mesh(pv_data, scalars=scalars, rgb=rgb, point_size=point_size)
+    pl.camera.parallel_projection = True
 
     return pl
 
@@ -56,10 +52,10 @@ def visualize_pointcloud(
 def visualize_pointclouds_simply(
     pcd: PointCloud | np.ndarray | Vector3dVector | None = None,
     point_size: int = 3,
-    camera_pos: list | None = None,
     bg_color: str | tuple = ("white", "gray"),
     visualize_normals: bool = False,
-) -> Plotter:
+    plotter: Plotter | None = None,
+):
     if isinstance(pcd, PointCloud):
         points = np.asarray(pcd.points)
         colors = np.asarray(pcd.colors) if pcd.has_colors() else None
@@ -72,7 +68,12 @@ def visualize_pointclouds_simply(
     else:
         raise ValueError("pcd는 Open3D PointCloud, numpy array, 또는 Vector3dVector 타입이어야 합니다.")
 
-    pl = visualize_pointcloud(points, colors, point_size, camera_pos, bg_color)
+    if plotter is not None:
+        pl = plotter
+    else:
+        pl = Plotter()
+
+    visualize_pointcloud(points, colors, point_size, bg_color, pl)
 
     if visualize_normals:
         if isinstance(pcd, PointCloud):
@@ -80,8 +81,8 @@ def visualize_pointclouds_simply(
         else:
             raise ValueError("법선을 가시화하려면 pcd가 Open3D PointCloud 타입이어야 합니다.")
 
-    pl.show()
-
+    if plotter is None:
+        pl.show()
     return pl
 
 
@@ -98,7 +99,7 @@ def visualize_selectable_pointcloud(
     else:
         points = pcd
         colors = None
-    pl = visualize_pointcloud(points, colors, point_size, camera_pos, bg_color)
+    pl = visualize_pointcloud(points, colors, point_size, bg_color)
 
     # 텍스트 출력 위젯 생성--------------------------------------------------------
     output = Textarea(layout=Layout(width="auto", height="80px"))
@@ -214,7 +215,7 @@ def visualize_mesh(
     Open3D TriangleMesh를 PyVista로 변환하여 시각화합니다.
 
     Args:
-        mesh: o3d.geometry.TriangleMesh 타입 메시 모델
+        mesh (o3d.geometry.TriangleMesh): 메시 모델
         color: 메시 색 또는 컬러 맵
         show_edges: 엣지 표시 여부
         camera_pos: 카메라 위치 (PyVista 형식)
@@ -414,3 +415,30 @@ def add_coordinate_frame(
                 text_color=col,
                 always_visible=True,
             )
+
+def add_points(
+    plotter: Plotter,
+    pcd: PointCloud,
+    point_size: int = 3,
+):
+    """
+    주어진 PointCloud의 포인트를 Plotter에 추가합니다.
+
+    Args:
+        plotter (Plotter): PyVista Plotter 인스턴스.
+        pcd (PointCloud): 추가할 포인트 클라우드.
+        point_size (int, optional): 포인트 크기. 기본값은 3입니다.
+    """
+    points = np.asarray(pcd.points)
+    pv_data = pv.PolyData(points)
+
+    colors = None
+    if pcd.has_colors():
+        colors = np.asarray(pcd.colors)
+        # Open3D 색상이 [0,1] float인 경우 uint8 [0,255]로 변환
+        if colors.dtype.kind in ("f", "c"):
+            colors = np.clip(colors * 255.0, 0, 255).astype(np.uint8)
+        pv_data["colors"] = colors
+        plotter.add_points(pv_data, scalars="colors", rgb=True, point_size=point_size)
+    else:
+        plotter.add_points(pv_data, color="red", point_size=point_size)
