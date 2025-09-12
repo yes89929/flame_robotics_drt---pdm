@@ -353,8 +353,8 @@ class EndEffectorPoseOptimizer:
             np.asarray(self._scan_data.points),
             target_point,
             normal_m * -1,  # 법선 벡터의 반대 방향
-            radius=0.005,  # 배관 지름에 따라 조절 필요
-            height=0.3,  # 배관 직경 및 브랜치 간 거리에 따라 조절 필요
+            0.005,  # 배관 지름에 따라 조절 필요
+            (-0.1, 0.3),  # 배관 직경 및 브랜치 간 거리에 따라 조절 필요
         )
 
         if self.__is_debug_mode:
@@ -473,8 +473,20 @@ class EndEffectorPoseOptimizer:
         cylinder_start_point: np.ndarray | tuple[float, float, float],  # 실린더 시작점
         cylinder_axis: np.ndarray | tuple[float, float, float],  # 실린더 축 (단위벡터)
         radius: float,  # 실린더 반지름
-        height: float,  # 실린더 높이
+        height_range: list[float] | tuple[float, float],  # 실린더 높이 범위 [min, max]
     ) -> np.ndarray:
+        """실린더 내부에 있는 점들을 추출.
+
+        Args:
+            points: 점군.
+            cylinder_start_point: 실린더 시작점.
+            cylinder_axis: 실린더 축 (단위벡터).
+            radius: 실린더 반지름.
+            height_range: 실린더 높이 범위 [min, max].
+
+        Returns:
+            np.ndarray: 실린더 내부에 포함되는 점들.
+        """
         # 실린더 축 단위 벡터로 정규화 및 시작점 배열로 변환
         axis = np.asarray(cylinder_axis)
         axis = axis / np.linalg.norm(axis)
@@ -484,7 +496,7 @@ class EndEffectorPoseOptimizer:
         proj = np.dot(vec, axis)
 
         # 실린더의 높이와 반지름에 대한 마스크 생성
-        mask_height = (proj >= 0) & (proj <= height)
+        mask_height = (proj >= height_range[0]) & (proj <= height_range[1])
         radial = vec - np.outer(proj, axis)
         mask_radius = np.linalg.norm(radial, axis=1) <= radius
         mask = mask_height & mask_radius
