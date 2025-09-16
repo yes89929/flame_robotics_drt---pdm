@@ -167,6 +167,122 @@ class EndEffectorPoseOptimizer:
 
         return dda_candidates_filtered_json, dda_pose_candidates_filtered, dda_tcp_pose_candidates
 
+    def __rotate_dda_pose_around_pipe_axis(
+        self,
+        dda_pose: np.ndarray,
+        rotation_angle_deg: float = 90.0,
+    ) -> np.ndarray:
+        """DDA 자세를 배관 중심축 기준으로 회전시킴.
+
+        Args:
+            dda_pose: 원본 DDA 자세 [x, y, z, roll, pitch, yaw].
+            rotation_angle_deg: 회전 각도 (도). Defaults to 90.0.
+
+        Returns:
+            np.ndarray: 회전된 DDA 자세 [x, y, z, roll, pitch, yaw].
+        """
+        # 배관 중심축 단위 벡터
+        pipe_axis_unit = self.__pipe_direction / np.linalg.norm(self.__pipe_direction)
+
+        # DDA 위치를 배관 중심축 기준으로 회전
+        dda_position = dda_pose[:3]
+
+        # 배관 축 위에 DDA 위치를 투영하여 회전 중심 계산
+        vec_to_dda = dda_position - self.__pipe_center
+        proj_len = np.dot(vec_to_dda, pipe_axis_unit)
+        rotation_center = self.__pipe_center + proj_len * pipe_axis_unit
+
+        # 회전 중심에서 DDA까지의 벡터
+        radius_vector = dda_position - rotation_center
+
+        # 로드리게스 회전 공식으로 위치 회전
+        cos_angle = np.cos(np.radians(rotation_angle_deg))
+        sin_angle = np.sin(np.radians(rotation_angle_deg))
+
+        k_cross_v = np.cross(pipe_axis_unit, radius_vector)
+        k_dot_v = np.dot(pipe_axis_unit, radius_vector)
+
+        rotated_radius_vector = (
+            radius_vector * cos_angle + k_cross_v * sin_angle + pipe_axis_unit * k_dot_v * (1 - cos_angle)
+        )
+
+        rotated_position = rotation_center + rotated_radius_vector
+
+        # DDA 자세(회전)도 같은 각도만큼 회전
+        original_rotation = R.from_euler("xyz", dda_pose[3:])
+        axis_rotation = R.from_rotvec(pipe_axis_unit * np.radians(rotation_angle_deg))
+        rotated_rotation = axis_rotation * original_rotation
+        rotated_rpy = rotated_rotation.as_euler("xyz")
+
+        return np.hstack([rotated_position, rotated_rpy])
+
+    def __calculate_rt_pose_for_angle(
+        self,
+        dda_tcp_pose: np.ndarray,
+        angle_deg: float,
+        distance_from_dda_to_rt: float,
+    ) -> np.ndarray:
+        """주어진 DDA 자세와 각도에 대해 RT 자세 계산.
+
+        Args:
+            dda_tcp_pose: DDA TCP 자세 [x, y, z, roll, pitch, yaw].
+            angle_deg: RT 배치 각도 (도).
+            distance_from_dda_to_rt: DDA TCP와 RT TCP 사이의 거리 (m).
+
+        Returns:
+            np.ndarray: RT TCP 자세 [x, y, z, roll, pitch, yaw].
+        """
+        # DDA TCP 좌표계에서 회전 행렬 추출
+        dda_rot_matrix = R.from_euler("xyz", dda_tcp_pose[3:]).as_matrix()
+        dda_x_axis = dda_rot_matrix[:, 0]  # DDA TCP X축
+        dda_z_axis = dda_rot_matrix[:, 2]  # DDA TCP Z축
+
+        # DDA TCP의 Z축 단위 벡터 (XY 평면의 법선)
+        dda_z_axis_unit = dda_z_axis / np.linalg.norm(dda_z_axis)
+
+        # 로드리게스 회전 공식으로 DDA X축을 DDA Z축 주위로 angle_deg만큼 회전
+        cos_angle = np.cos(np.radians(angle_deg))
+        sin_angle = np.sin(np.radians(angle_deg))
+
+        k_cross_v = np.cross(dda_z_axis_unit, dda_x_axis)
+        k_dot_v = np.dot(dda_z_axis_unit, dda_x_axis)
+
+        rt_y_direction = dda_x_axis * cos_angle + k_cross_v * sin_angle + dda_z_axis_unit * k_dot_v * (1 - cos_angle)
+
+        # RT TCP 위치: DDA TCP에서 RT Y축 방향으로 distance_from_dda_to_rt만큼 떨어진 위치
+        rt_position = dda_tcp_pose[:3] + rt_y_direction * distance_from_dda_to_rt
+
+        # RT TCP 방향 계산
+        # RT TCP X축: RT TCP에서 DDA TCP를 바라보는 방향
+        rt_to_dda_vector = dda_tcp_pose[:3] - rt_position
+        rt_x_axis = rt_to_dda_vector / np.linalg.norm(rt_to_dda_vector)
+
+        # RT TCP Y축: 위에서 계산한 rt_y_direction 사용
+        rt_y_axis = rt_y_direction / np.linalg.norm(rt_y_direction)
+
+        # RT TCP Z축: X축과 Y축의 외적으로 계산하여 올바른 직교 좌표계 구성
+        rt_z_axis = np.cross(rt_x_axis, rt_y_axis)
+        rt_z_axis = rt_z_axis / np.linalg.norm(rt_z_axis)
+
+        # Y축 재계산 (Z축과 X축의 외적으로 정확한 직교 좌표계 구성)
+        rt_y_axis = np.cross(rt_z_axis, rt_x_axis)
+        rt_y_axis = rt_y_axis / np.linalg.norm(rt_y_axis)
+
+        # RT TCP 회전 행렬 생성
+        rt_rot_matrix = np.column_stack([rt_x_axis, rt_y_axis, rt_z_axis])
+
+        # 회전 행렬의 유효성 검사
+        det = np.linalg.det(rt_rot_matrix)
+        if det <= 0:
+            # 좌수 좌표계인 경우 Z축의 방향을 뒤집어서 우수 좌표계로 변경
+            rt_z_axis = -rt_z_axis
+            rt_rot_matrix = np.column_stack([rt_x_axis, rt_y_axis, rt_z_axis])
+
+        rt_rpy = R.from_matrix(rt_rot_matrix).as_euler("xyz")
+
+        # RT TCP 자세 [x, y, z, roll, pitch, yaw]
+        return np.hstack([rt_position, rt_rpy])
+
     def calculate_DDA_RT_pose_for_taking_xray(
         self,
         target_point: tuple[float, float, float] | np.ndarray,
@@ -182,12 +298,13 @@ class EndEffectorPoseOptimizer:
             - DDA TCP의 Y축이 배관 길이 방향과 평행
             - 배관 표면에서 distance_from_dda_to_surface 거리에 위치
             - 배관과 충돌하지 않음
+            - 원본 자세(0도)와 배관 중심축 기준 90도 회전 자세 모두 검사
 
         RT 자세 후보 조건:
             - RT TCP의 X축이 DDA TCP의 중심을 향함
             - DDA TCP와 RT TCP 간 거리는 distance_from_dda_to_rt
             - DDA TCP의 XY 평면과 RT TCP의 XY 평면이 일치
-            - DDA TCP의 XY 평면에서 DDA TCP의 X축과 RT TCP의 Y축이 angle_of_rt만큼 벌어짐
+            - DDA TCP의 XY 평면에서 DDA TCP의 X축과 RT TCP의 Y축이 ±angle_of_rt만큼 벌어짐
             - 배관과 충돌하지 않음
 
         Args:
@@ -198,121 +315,111 @@ class EndEffectorPoseOptimizer:
             angle_of_rt: RT TCP X축과 DDA TCP X축 사이의 각도 (degree).
 
         Returns:
-            tuple: DDA-RT 자세 후보 쌍을 3가지 형태로 반환.
-                - JSON str 형식
-                - DDA poses array 형식
-                - RT poses array 형식
+            tuple: DDA-RT 자세 그룹을 2가지 형태로 반환.
+                - JSON str 형식: 그룹화된 DDA-RT 자세 쌍
+                - dict 형식: 그룹화된 DDA-RT 자세 쌍
         """
 
         # DDA 자세 후보 생성------------------------------------------------------
-        dda_tcp_pose_candidates = self.__calculate_dda_pose_candidate(
+        dda_base_candidates = self.__calculate_dda_pose_candidate(
             np.asarray(target_point),
             self.__pipe_radius + distance_from_dda_to_surface,
             num_candidates,
         )
 
-        # 배관과 충돌하는 후보 제거------------------------------------------------
-        mask = []
-        for i in range(len(dda_tcp_pose_candidates)):
+        # 배관과 충돌하지 않는 DDA 기본 자세만 필터링---------------------------------
+        valid_base_dda_poses = []
+        for dda_pose in dda_base_candidates:
             is_collision = self.__check_collision(
                 self.__dda_mesh,
-                dda_tcp_pose_candidates[i],
+                dda_pose,
                 self.__dda_invers_transform_mat,
             )
-            mask.append(not is_collision)
+            if not is_collision:
+                valid_base_dda_poses.append(dda_pose)
 
-        dda_tcp_pose_candidates_filtered = dda_tcp_pose_candidates[mask]
+        # DDA-RT 자세 그룹 생성---------------------------------------------------
+        pose_groups = []
 
-        # DDA 자세 후보 기반 RT 자세 후보 생성--------------------------------------
-        rt_tcp_pose_candidates = []
-        valid_dda_rt_pairs = []
+        for base_dda_pose in valid_base_dda_poses:
+            group_data = {}
 
-        for dda_tcp_pose in dda_tcp_pose_candidates_filtered:
-            # DDA TCP 좌표계에서 회전 행렬 추출
-            dda_rot_matrix = R.from_euler("xyz", dda_tcp_pose[3:]).as_matrix()
-            dda_x_axis = dda_rot_matrix[:, 0]  # DDA TCP X축
-            dda_y_axis = dda_rot_matrix[:, 1]  # DDA TCP Y축
-            dda_z_axis = dda_rot_matrix[:, 2]  # DDA TCP Z축
+            # 0도 (원본 자세) 처리
+            group_0_data = self.__process_dda_rt_combination(base_dda_pose, angle_of_rt, distance_from_dda_to_rt)
+            if group_0_data:
+                group_data["0"] = group_0_data
 
-            # RT TCP 위치 계산---------------------------------------------------
-            # DDA TCP X축과 배관 방향벡터로 구성된 평면에서 RT 위치 결정
-            # DDA TCP를 중심으로 배관 축에 수직인 평면에서 angle_of_rt만큼 회전한 위치
+            # 90도 회전 자세 처리
+            rotated_dda_pose = self.__rotate_dda_pose_around_pipe_axis(base_dda_pose, 90.0)
 
-            # 배관 축에 수직이면서 DDA X축 방향을 포함하는 평면의 기준 벡터 계산
-            pipe_direction_unit = self.__pipe_direction / np.linalg.norm(self.__pipe_direction)
-
-            # DDA X축을 배관 축에 수직인 평면에 투영
-            dda_x_on_perpendicular_plane = dda_x_axis - np.dot(dda_x_axis, pipe_direction_unit) * pipe_direction_unit
-            dda_x_on_perpendicular_plane = dda_x_on_perpendicular_plane / np.linalg.norm(dda_x_on_perpendicular_plane)
-
-            # 배관 축과 투영된 DDA X축의 외적으로 회전을 위한 수직 벡터 생성
-            perpendicular_vector = np.cross(pipe_direction_unit, dda_x_on_perpendicular_plane)
-            perpendicular_vector = perpendicular_vector / np.linalg.norm(perpendicular_vector)
-
-            # angle_of_rt만큼 회전한 방향 벡터 계산
-            rt_direction_from_dda = (
-                np.cos(np.radians(angle_of_rt)) * dda_x_on_perpendicular_plane
-                + np.sin(np.radians(angle_of_rt)) * perpendicular_vector
+            # 90도 회전된 DDA 자세의 충돌 검사
+            is_rotated_dda_collision = self.__check_collision(
+                self.__dda_mesh,
+                rotated_dda_pose,
+                self.__dda_invers_transform_mat,
             )
 
-            # RT TCP 위치: DDA TCP에서 distance_from_dda_to_rt만큼 떨어진 위치
-            rt_position = dda_tcp_pose[:3] + rt_direction_from_dda * distance_from_dda_to_rt
+            if not is_rotated_dda_collision:
+                group_90_data = self.__process_dda_rt_combination(
+                    rotated_dda_pose, angle_of_rt, distance_from_dda_to_rt
+                )
+                if group_90_data:
+                    group_data["90"] = group_90_data
 
-            # RT TCP 방향 계산---------------------------------------------------
-            # RT TCP X축: RT TCP에서 DDA TCP를 바라보는 방향
-            rt_to_dda_vector = dda_tcp_pose[:3] - rt_position
-            rt_x_axis = rt_to_dda_vector / np.linalg.norm(rt_to_dda_vector)
+            # "0"과 "90" 모두 유효할 때만 그룹에 추가
+            if "0" in group_data and "90" in group_data:
+                pose_groups.append(group_data)
 
-            # RT TCP Y축: 배관 방향과 평행하게 설정
-            rt_y_axis = pipe_direction_unit
+        # JSON 형태 출력 생성-----------------------------------------------------
+        pose_groups_json = json.dumps(pose_groups)
 
-            # RT TCP Z축: X축과 Y축의 외적으로 계산
-            rt_z_axis = np.cross(rt_x_axis, rt_y_axis)
-            rt_z_axis = rt_z_axis / np.linalg.norm(rt_z_axis)
+        return pose_groups_json, pose_groups
 
-            # RT TCP 회전 행렬 생성
-            rt_rot_matrix = np.column_stack([rt_x_axis, rt_y_axis, rt_z_axis])
-            rt_rpy = R.from_matrix(rt_rot_matrix).as_euler("xyz")
+    def __process_dda_rt_combination(
+        self,
+        dda_pose: np.ndarray,
+        angle_of_rt: float,
+        distance_from_dda_to_rt: float,
+    ) -> dict[str, list[float]] | None:
+        """DDA 자세에 대해 RT1(+angle), RT2(-angle) 조합 처리.
 
-            # RT TCP 자세 [x, y, z, roll, pitch, yaw]
-            rt_tcp_pose = np.hstack([rt_position, rt_rpy])
-            rt_tcp_pose_candidates.append(rt_tcp_pose)
+        Args:
+            dda_pose: DDA TCP 자세.
+            angle_of_rt: RT 배치 각도.
+            distance_from_dda_to_rt: DDA-RT 간 거리.
 
-            # DDA-RT 쌍 임시 저장
-            valid_dda_rt_pairs.append((dda_tcp_pose, rt_tcp_pose))
+        Returns:
+            dict | None: 유효한 RT 자세가 있으면 DDA-RT 조합 딕셔너리, 없으면 None.
+        """
+        result = {"DDA": dda_pose.tolist()}
 
-        # 배관과 충돌하지 않는 DDA-RT 자세 후보 쌍 생성------------------------------
-        final_dda_poses = []
-        final_rt_poses = []
+        # RT1 (+angle) 계산 및 충돌 검사
+        rt1_pose = self.__calculate_rt_pose_for_angle(dda_pose, angle_of_rt, distance_from_dda_to_rt)
+        is_rt1_collision = self.__check_collision(
+            self.__rt_mesh,
+            rt1_pose,
+            self.__rt_invers_transform_mat,
+        )
 
-        for dda_tcp_pose, rt_tcp_pose in valid_dda_rt_pairs:
-            # RT 충돌 검사
-            is_rt_collision = self.__check_collision(
-                self.__rt_mesh,
-                rt_tcp_pose,
-                self.__rt_invers_transform_mat,
-            )
+        if not is_rt1_collision:
+            result["RT1"] = rt1_pose.tolist()
 
-            if not is_rt_collision:
-                final_dda_poses.append(dda_tcp_pose)
-                final_rt_poses.append(rt_tcp_pose)
+        # RT2 (-angle) 계산 및 충돌 검사
+        rt2_pose = self.__calculate_rt_pose_for_angle(dda_pose, -angle_of_rt, distance_from_dda_to_rt)
+        is_rt2_collision = self.__check_collision(
+            self.__rt_mesh,
+            rt2_pose,
+            self.__rt_invers_transform_mat,
+        )
 
-        # 결과를 numpy array로 변환
-        if final_dda_poses:
-            final_dda_poses_array = np.array(final_dda_poses)
-            final_rt_poses_array = np.array(final_rt_poses)
+        if not is_rt2_collision:
+            result["RT2"] = rt2_pose.tolist()
+
+        # RT1이나 RT2 중 하나라도 유효하면 결과 반환
+        if "RT1" in result or "RT2" in result:
+            return result
         else:
-            final_dda_poses_array = np.empty((0, 6))
-            final_rt_poses_array = np.empty((0, 6))
-
-        # JSON 형태 출력: [ {dda: [x,y,z,r,p,y], rt: [x,y,z,r,p,y]}, ... ]
-        pose_list = []
-        for i in range(len(final_dda_poses_array)):
-            pose_list.append({"dda": final_dda_poses_array[i].tolist(), "rt": final_rt_poses_array[i].tolist()})
-
-        dda_rt_candidates_json = json.dumps(pose_list)
-
-        return dda_rt_candidates_json, final_dda_poses_array, final_rt_poses_array
+            return None
 
     def calculate_pipe_profile(
         self,
