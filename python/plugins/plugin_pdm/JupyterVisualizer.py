@@ -416,6 +416,53 @@ def add_coordinate_frame(
                 always_visible=True,
             )
 
+
+def add_box(
+    plotter: Plotter,
+    min_bound: np.ndarray | list | tuple,
+    max_bound: np.ndarray | list | tuple,
+    color: str | tuple = "blue",
+    opacity: float = 1.0,
+):
+    """
+    PyVista Plotter에 박스를 추가합니다.
+
+    Args:
+        plotter (Plotter): PyVista Plotter 인스턴스.
+        min_bound (np.ndarray | list | tuple): 박스의 최소 경계 좌표 [x_min, y_min, z_min].
+        max_bound (np.ndarray | list | tuple): 박스의 최대 경계 좌표 [x_max, y_max, z_max].
+        color (str | tuple): 박스 색상. 기본값은 "blue".
+        opacity (float): 투명도 (0.0~1.0). 기본값은 1.0 (불투명).
+    """
+    # min_bound 타입 확인 후 numpy로 변환
+    if not isinstance(min_bound, np.ndarray):
+        if isinstance(min_bound, (list, tuple)) and len(min_bound) == 3:
+            min_bound = np.array(min_bound, dtype=float)
+        else:
+            raise ValueError("min_bound must be a numpy array, or a list/tuple of length 3.")
+
+    # max_bound 타입 확인 후 numpy로 변환
+    if not isinstance(max_bound, np.ndarray):
+        if isinstance(max_bound, (list, tuple)) and len(max_bound) == 3:
+            max_bound = np.array(max_bound, dtype=float)
+        else:
+            raise ValueError("max_bound must be a numpy array, or a list/tuple of length 3.")
+
+    # PyVista Box 생성 (bounds 형식: [x_min, x_max, y_min, y_max, z_min, z_max])
+    bounds = [
+        min_bound[0],
+        max_bound[0],  # x_min, x_max
+        min_bound[1],
+        max_bound[1],  # y_min, y_max
+        min_bound[2],
+        max_bound[2],  # z_min, z_max
+    ]
+    box = pv.Box(bounds=bounds)
+
+    # Plotter에 박스 추가
+    plotter.add_mesh(box, color=color, opacity=opacity)
+
+
 def add_points(
     plotter: Plotter,
     pcd: PointCloud,
