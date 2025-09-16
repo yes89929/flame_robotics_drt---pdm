@@ -6,3 +6,4 @@ scikit-learn
 pyvista[all, trame]
 ipympl
 ipywidgets
+pandas
