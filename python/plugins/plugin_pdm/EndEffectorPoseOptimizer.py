@@ -317,22 +317,38 @@ class EndEffectorPoseOptimizer:
     def calculate_pipe_profile(
         self,
         target_point: tuple[float, float, float] | np.ndarray,  # x,y,z
-    ) -> None:
-        """
-        직배관의 프로파일(방향벡터, 중심점, 반지름) 계산하여 멤버변수에 저장
+        sampling_size_for_calculating_normal: float = 0.01,
+        radius_offset_for_sampling_points_in_sphere: float = 0.003,
+    ):
+        """직배관의 프로파일(방향벡터, 중심점, 반지름) 계산하여 멤버변수에 저장.
 
-        :param target_point: 직배관 표면 위의 한 점
+        Args:
+            target_point: 직배관 표면 위의 한 점.
+            sampling_size_for_calculating_normal: 법선 계산을 위한 샘플링 크기. Defaults to 0.01.
+            radius_offset_for_sampling_points_in_sphere: 구 샘플링을 위한 반지름 오프셋. Defaults to 0.003.
         """
+
+        if self.__is_debug_mode:
+            self.debuging_info = {}
+
         # 검사 대상 주변 미소 점군 추출---------------------------------------------
         if not isinstance(target_point, np.ndarray):
             target_point = np.array(target_point)
-        gap = np.array([0.05, 0.05, 0.05])  # 점군 밀도나 배관 직경에 따라 조절 필요
+        gap = np.full(3, sampling_size_for_calculating_normal, dtype=np.float64)
         min_bound = target_point - gap
         max_bound = target_point + gap
         box = o3d.geometry.AxisAlignedBoundingBox(min_bound, max_bound)  # type: ignore
 
+        if self.__is_debug_mode:
+            self.debuging_info["sampling_box"] = [min_bound, max_bound]
+
         indices = box.get_point_indices_within_bounding_box(self._scan_data.points)
         selected_points = self._scan_data.select_by_index(indices)
+        if len(selected_points.points) == 0:
+            selected_points = None
+            raise RuntimeError(
+                "target_point 주변에 점군이 없습니다. target_pont 또는 sampling_size_for_calculating_normal 값을 조절하세요."
+            )
 
         if self.__is_debug_mode:
             self.debuging_info["selected_points"] = selected_points
@@ -382,7 +398,7 @@ class EndEffectorPoseOptimizer:
         points_in_sphere = self.__extract_points_in_sphere(
             np.asarray(self._scan_data.points),
             estimated_center,
-            estimated_radius + 0.01,  # 배관 지름에 따라 조절 필요
+            estimated_radius + radius_offset_for_sampling_points_in_sphere,  # 배관 지름에 따라 조절 필요
         )
 
         # 실린더 피팅------------------------------------------------------------
