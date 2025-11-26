@@ -1,9 +1,10 @@
 open3d
 numpy
-urdfdom_py
+# urdfdom_py
+urdf_parser_py
 scikit-learn
 # 노트북에서 점군 가시화-----------------------------------------------------------
-pyvista[all, trame]
+pyvista[all,trame]
 ipympl
 ipywidgets
 pandas
