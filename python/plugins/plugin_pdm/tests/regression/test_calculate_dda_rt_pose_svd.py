@@ -45,14 +45,6 @@ def pipe_no_3_optimizer():
     if missing:
         pytest.skip(f"필요 데이터 파일 부재: {missing}")
 
-    # Windows + 한글 경로 + 8.3 단축 경로 비활성 볼륨에서는 Open3D 의
-    # read_triangle_mesh 가 빈 mesh 를 반환하여 sample_points_uniformly 가
-    # "Input mesh has no triangles" 로 RuntimeError 를 던진다. 외부 의존성
-    # 한계이므로 사전 skip.
-    for p in (DDA_URDF, RT_URDF):
-        if any(ord(ch) > 127 for ch in str(p)):
-            pytest.skip(f"non-ASCII URDF path (Open3D 한계, 빈 mesh 반환): {p}")
-
     pd = pytest.importorskip("pandas", reason="pandas 미설치")
     from EndEffectorPoseOptimizer import EndEffectorPoseOptimizer  # noqa: WPS433 — sys.path 는 conftest 가 추가
 

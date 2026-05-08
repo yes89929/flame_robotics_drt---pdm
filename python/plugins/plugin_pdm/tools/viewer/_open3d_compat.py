@@ -1,25 +1,36 @@
 """Windows 한글 경로용 Open3D 호환 박막.
 
-``open3d.io.read_triangle_mesh`` / ``read_point_cloud`` 등이 Windows 의
-한글(또는 비-ASCII) 절대경로를 받으면 내부에서 UTF-8 디코딩 오류로 실패한다
-(예: ``UnicodeDecodeError: 'utf-8' codec can't decode byte 0xb3 …``).
-원인은 Open3D 가 std::string 으로 받은 경로를 fopen 에 그대로 전달하면서
-Windows 의 system code page 와 UTF-8 사이의 불일치를 처리하지 않는 것.
+``open3d.io.read_triangle_mesh`` 가 Windows 의 한글(또는 비-ASCII) 절대경로를
+받으면 내부에서 UTF-8 디코딩 오류로 빈 mesh 를 반환한다 (예:
+``UnicodeDecodeError: 'utf-8' codec can't decode byte 0xb3 …``). 원인은
+Open3D 가 std::string 으로 받은 경로를 fopen 에 그대로 전달하면서 Windows
+system code page 와 UTF-8 사이의 불일치를 처리하지 않는 것.
 
-본 모듈은 진입점 (`__main__.py`) 에서 한 번 ``apply()`` 를 호출해 위 두
-함수를 *경로를 Windows 8.3 단축경로 (순수 ASCII) 로 변환한 뒤 Open3D 에
-전달하는 wrapper* 로 교체한다. 알고리즘 측 ``EndEffectorPoseOptimizer`` /
-``JupyterVisualizer`` 코드는 한 줄도 수정하지 않으며, 이 박막은 viewer 가
-존재하지 않을 때(예: 노트북 실행) 아무 영향도 주지 않는다.
+본 모듈은 진입점 (`__main__.py`) 에서 한 번 ``apply()`` 를 호출해 STL 로더를
+두 단계 wrapper 로 교체한다:
+  1. ``GetShortPathNameW`` 로 8.3 단축경로 변환 시도. NTFS + ASCII leaf 면
+     ASCII 경로가 반환되어 Open3D 가 정상 read.
+  2. 1단계 결과가 빈 mesh 면 ``trimesh.load`` 로 한 번 더 read 한 뒤
+     vertices/faces 를 ``o3d.geometry.TriangleMesh`` 로 옮긴다. trimesh 는
+     Python 단에서 path 를 처리하므로 한글 경로/Google Drive 모두 안전.
+
+실측: ``read_point_cloud`` 는 한글 경로/Google Drive 에서도 정상 동작하므로
+패치 대상에서 제외했다 (Open3D 0.19.0 기준).
+
+알고리즘 측 ``EndEffectorPoseOptimizer`` / ``JupyterVisualizer`` 코드는 한 줄도
+수정하지 않으며, 이 박막은 viewer 진입점이 ``apply()`` 를 호출했을 때만
+효과를 가진다.
 """
 
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
+_LOG = logging.getLogger(__name__)
 _PATCHED = False
 
 
@@ -54,8 +65,37 @@ def _to_short_path(path: Any) -> Any:
     return buf.value
 
 
+def _trimesh_fallback_read(filename: Any, o3d_module) -> Any:
+    """trimesh 로 STL 을 읽어 ``o3d.geometry.TriangleMesh`` 로 변환. 실패 시
+    None 반환. trimesh 는 Python 단에서 path 를 처리하므로 한글 경로/Google
+    Drive 모두 안전."""
+
+    try:
+        import numpy as np  # type: ignore
+        import trimesh  # type: ignore
+    except ImportError:
+        _LOG.warning("trimesh fallback unavailable (numpy/trimesh import failed)")
+        return None
+
+    try:
+        tm = trimesh.load(str(filename), force="mesh", process=False)
+    except Exception as exc:  # noqa: BLE001
+        _LOG.warning("trimesh.load failed for %s: %s", filename, exc)
+        return None
+
+    faces = getattr(tm, "faces", None)
+    vertices = getattr(tm, "vertices", None)
+    if faces is None or vertices is None or len(faces) == 0:
+        return None
+
+    mesh = o3d_module.geometry.TriangleMesh()
+    mesh.vertices = o3d_module.utility.Vector3dVector(np.asarray(vertices, dtype=np.float64))
+    mesh.triangles = o3d_module.utility.Vector3iVector(np.asarray(faces, dtype=np.int32))
+    return mesh
+
+
 def apply() -> None:
-    """``open3d.io`` 의 mesh/pcd 로더를 한글 경로 호환 wrapper 로 교체. 멱등."""
+    """``open3d.io.read_triangle_mesh`` 를 한글 경로 호환 wrapper 로 교체. 멱등."""
 
     global _PATCHED
     if _PATCHED:
@@ -72,15 +112,27 @@ def apply() -> None:
         pass
 
     _orig_read_triangle_mesh = _o3dio.read_triangle_mesh
-    _orig_read_point_cloud = _o3dio.read_point_cloud
 
     def _patched_read_triangle_mesh(filename, *args, **kwargs):
-        return _orig_read_triangle_mesh(_to_short_path(filename), *args, **kwargs)
+        # 1단계: 8.3 단축경로 변환 후 Open3D 에 위임. NTFS + ASCII leaf 면 성공.
+        mesh = _orig_read_triangle_mesh(_to_short_path(filename), *args, **kwargs)
+        if len(mesh.triangles) > 0:
+            return mesh
 
-    def _patched_read_point_cloud(filename, *args, **kwargs):
-        return _orig_read_point_cloud(_to_short_path(filename), *args, **kwargs)
+        # 2단계: 빈 mesh 인 경우 trimesh fallback. 한글 leaf / Google Drive 케이스.
+        if isinstance(filename, (bytes, bytearray)) or not Path(str(filename)).is_file():
+            return mesh
+
+        fallback = _trimesh_fallback_read(filename, _o3d)
+        if fallback is not None:
+            _LOG.debug("trimesh fallback succeeded for: %s", filename)
+            return fallback
+        _LOG.error(
+            "trimesh fallback failed for empty Open3D mesh — downstream will see 0 triangles: %s",
+            filename,
+        )
+        return mesh
 
     _o3dio.read_triangle_mesh = _patched_read_triangle_mesh
-    _o3dio.read_point_cloud = _patched_read_point_cloud
 
     _PATCHED = True
