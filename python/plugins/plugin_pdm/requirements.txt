@@ -8,3 +8,8 @@ pyvista[all,trame]
 ipympl
 ipywidgets
 pandas
+# tools/viewer 데스크톱 GUI -------------------------------------------------------
+PyQt6
+pyvistaqt
+# tools/viewer 자동 테스트 (dev) --------------------------------------------------
+pytest-qt
