@@ -6,6 +6,14 @@
 ``EndEffectorPoseOptimizer.calculate_DDA_RT_pose_for_taking_xray`` 가 매
 호출 시 ``self.debuging_info = {}`` 로 초기화하므로 emit 직전 deepcopy 가
 필수다.
+
+호출 인자 정책 (notebook ``demo(...).ipynb`` 셀 ``d15784d4`` / ``08f981f0`` 와
+동일):
+  - ``calculate_pipe_profile`` ← ``position_with_offset`` (= detection_point;
+    검사 대상 좌표를 외벽 표면으로 옮긴 위치)
+  - ``calculate_DDA_RT_pose_for_taking_xray`` ← ``position`` (= inspection_point;
+    원본 검사 좌표). 두 함수에 같은 좌표를 넘기면 자세 후보가 모두 충돌
+    필터링되어 실패한다.
 """
 
 from __future__ import annotations
@@ -58,7 +66,7 @@ class BatchWorker(QThread):
             try:
                 self._optimizer.calculate_pipe_profile(point.position_with_offset)
                 _, pose_groups = self._optimizer.calculate_DDA_RT_pose_for_taking_xray(
-                    target_point=point.position_with_offset,
+                    target_point=point.position,
                     num_candidates=self._num_candidates,
                     distance_from_dda_to_surface=self._distance_from_dda_to_surface,
                     distance_from_dda_to_rt=self._distance_from_dda_to_rt,
