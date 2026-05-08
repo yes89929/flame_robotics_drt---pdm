@@ -174,3 +174,13 @@ typings
 # macOS 시스템 파일
 .DS_Store
 **/.DS_Store
+
+# AI 에이전트 작업 가이드 (개인용, 머지 제외)
+**/AGENTS.md
+
+# AI 도구 상태/메모리 (개인 환경 전용)
+.claude/
+.omc/
+
+# 한화오션 지정 포인트 실험 결과 (옵시디언에서 별도 관리)
+python/plugins/plugin_pdm/한화오션 지정 포인트 실험 결과/
