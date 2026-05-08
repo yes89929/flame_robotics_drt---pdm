@@ -51,22 +51,30 @@ def test_link_transform_for_tcp_pose_composes_correctly() -> None:
 
 
 def _try_load_dda_optimizer():
-    """URDF 로드를 시도하고, 비-ASCII 경로로 인한 Open3D 인코딩 실패 시 skip.
+    """URDF 로드를 시도하고, 비-ASCII 경로로 인한 Open3D 한계 시 skip.
 
     ``EndEffectorPoseOptimizer.load_DDA_from_urdf`` 는 내부에서
-    ``open3d.io.read_triangle_mesh`` 를 호출하는데, 이 함수가 Windows 한글
-    경로(예: ``G:\\내 드라이브\\...``) 를 처리하지 못하고
-    ``UnicodeDecodeError`` 를 던진다. 이는 알고리즘 코드 외부 의존성의
-    한계이며 본 어댑터의 책임이 아니다.
+    ``open3d.io.read_triangle_mesh`` 를 호출하는데, Windows 한글 경로
+    (예: ``G:\\내 드라이브\\...``) + 8.3 단축 경로 비활성 볼륨에서는
+    이 함수가:
+      1. (verbosity 미차단 시) ``UnicodeDecodeError`` 를 던짐
+      2. (verbosity 차단 시) 예외는 안 나지만 빈 ``TriangleMesh`` 를 반환
+    어느 쪽이든 후속 ``sample_points_uniformly`` / ``len(vertices)`` 검사가
+    실패하므로, 비-ASCII 경로면 사전에 skip 한다.
     """
 
     if not app_paths.dda_urdf_path().is_file():
         pytest.skip("DDA URDF not available")
+
+    urdf_path = str(app_paths.dda_urdf_path())
+    if any(ord(ch) > 127 for ch in urdf_path):
+        pytest.skip(f"non-ASCII URDF path (Open3D 한계, 빈 mesh 반환): {urdf_path}")
+
     from EndEffectorPoseOptimizer import EndEffectorPoseOptimizer  # type: ignore
 
     opt = EndEffectorPoseOptimizer(debug_mode=False)
     try:
-        opt.load_DDA_from_urdf(str(app_paths.dda_urdf_path()))
+        opt.load_DDA_from_urdf(urdf_path)
     except UnicodeDecodeError as exc:
         pytest.skip(f"non-ASCII URDF path 처리 불가 (Open3D 한계): {exc}")
     return opt
