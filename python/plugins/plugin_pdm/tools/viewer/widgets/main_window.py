@@ -75,7 +75,7 @@ class MainWindow(QMainWindow):
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(self._side_panel)
-        splitter.addWidget(self._plot_view.interactor)
+        splitter.addWidget(self._plot_view)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([280, 1100])
@@ -161,6 +161,7 @@ class MainWindow(QMainWindow):
         self._side_panel.set_points(self._current_points)
         self._side_panel.set_optimize_enabled(False)
         self._side_panel.set_optimize_label("배관 점군 로드 중…")
+        self._side_panel.clear_overview()
         self._reset_progress()
         self._plot_view.clear_all()
         self._plot_view.render()
@@ -187,6 +188,8 @@ class MainWindow(QMainWindow):
 
         self._side_panel.set_optimize_enabled(True)
         self._side_panel.set_optimize_label("엔드이펙터 최적 위치 탐지")
+        # 사이드 패널 오버뷰 위젯에 배관 전체 + 검사 포인트 라벨 렌더
+        self._side_panel.update_overview(polydata, self._current_points)
         self.statusBar().showMessage(f"{pipe_id} — 점군 로드 완료. 검사 포인트를 클릭하거나 일괄 탐지를 실행하세요.")
 
         # 첫 항목 자동 선택 → 배관만 표시
@@ -310,4 +313,8 @@ class MainWindow(QMainWindow):
             self._plot_view.close()
         except Exception:  # noqa: BLE001
             _logger.exception("plot_view.close 중 예외")
+        try:
+            self._side_panel.cleanup()
+        except Exception:  # noqa: BLE001
+            _logger.exception("side_panel.cleanup 중 예외")
         super().closeEvent(event)

@@ -3,6 +3,10 @@
 PyVista ``Plotter(shape=(2,2))`` 의 4 subplot (iso/XY/XZ/YZ) 에 동일한 객체
 를 추가한다. 0도 / 90도 pose group 의 변별성은 노트북 demo (cell
 ``1ea8ce44`` line 626/640) 의 색상 정책을 그대로 재사용한다.
+
+검사 포인트 부분 확대(줌)는 노트북 cell ``2d85e9ca`` 와 동일한 방식으로
+``target_point ± CROP_HALF_EXTENT`` AABB 박스로 점군을 크롭해 자연스럽게
+카메라 프레임이 좁아지도록 한다.
 """
 
 from __future__ import annotations
@@ -10,6 +14,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 import numpy as np
+import pyvista as pv
 
 # JupyterVisualizer 는 plugin_pdm 루트에서 직접 import (sys.path 가드 후).
 import JupyterVisualizer as jv  # type: ignore
@@ -28,31 +33,54 @@ COLOR_DDA_90DEG: tuple[int, int, int] = (150, 150, 255)
 COLOR_RT_0DEG: tuple[int, int, int] = (255, 150, 150)
 COLOR_RT_90DEG: tuple[int, int, int] = (150, 150, 255)
 
-COLOR_PIPE_DEFAULT: str = "lightgray"
+COLOR_PIPE_DEFAULT: str = "skyblue"     # 점군 기본 색 (사용자 지정: 하늘색)
 COLOR_TARGET_SPHERE: str = "red"
+COLOR_BACKGROUND: str = "white"         # 단색 흰색 (그라데이션 사용 안 함)
 
-_SUBPLOT_CELLS: tuple[tuple[int, int, str], ...] = (
-    (0, 0, "view_isometric"),
-    (0, 1, "view_xy"),
-    (1, 0, "view_xz"),
-    (1, 1, "view_yz"),
-)
+# 오버뷰(전체 가시화) 색상 — 노트북 cell 67e03b7d 정책
+COLOR_INSPECTION_NORMAL: str = "green"   # offset 없음 (position == position_with_offset)
+COLOR_INSPECTION_OFFSET: str = "red"     # offset 있음 — 원본 검사 좌표
+COLOR_DETECTION_OFFSET: str = "blue"     # offset 있음 — 표면으로 옮긴 좌표
+
+# 4-view 줌: target ± 0.3m AABB 로 크롭 (notebook cell 2d85e9ca 과 동일)
+CROP_HALF_EXTENT: float = 0.3
+
+def _iter_plotters(plot_view: Any) -> Iterable[tuple[Any, str]]:
+    """``PlotView.plotters()`` 호출 — 4쌍 ``(plotter, view_fn_name)``.
+
+    PlotView 가 4개의 독립 ``QtInteractor`` 를 보유하는 컨테이너이므로 각
+    plotter 에 대해 직접 작업한다. 단일 plotter shape=(2,2) 시절에 사용하던
+    ``plot_view.subplot(r, c)`` 호출은 더 이상 필요하지 않다.
+    """
+
+    return plot_view.plotters()
 
 
-def for_each_subplot(plot_view: Any) -> Iterable[tuple[int, int, str]]:
-    """4 subplot 을 순회. 각 yield 직전에 ``plot_view.subplot(r, c)`` 활성화."""
+def _crop_polydata_around(
+    scan_polydata: Any,
+    target_point: np.ndarray,
+    half_extent: float = CROP_HALF_EXTENT,
+) -> Any:
+    """``target_point ± half_extent`` AABB 박스 안의 점만 남긴 PolyData 반환.
 
-    for r, c, view_fn in _SUBPLOT_CELLS:
-        plot_view.subplot(r, c)
-        yield r, c, view_fn
+    notebook cell ``2d85e9ca`` 의 ``o3d.geometry.AxisAlignedBoundingBox`` +
+    ``crop`` 와 동치. 박스 안에 점이 하나도 없으면 원본을 반환해 빈 화면을
+    피한다 (검사 포인트가 점군 외곽에 찍힌 비정상 케이스 방어).
+    """
 
-
-def restore_camera_views(plot_view: Any) -> None:
-    """``clear()`` 후 손상된 카메라 프리셋을 복원."""
-
-    for r, c, view_fn in _SUBPLOT_CELLS:
-        plot_view.subplot(r, c)
-        getattr(plot_view, view_fn)()
+    if scan_polydata is None:
+        return None
+    points = np.asarray(scan_polydata.points)
+    if points.size == 0:
+        return scan_polydata
+    target = np.asarray(target_point, dtype=float)
+    mask = np.all(np.abs(points - target) <= half_extent, axis=1)
+    if not mask.any():
+        return scan_polydata
+    cropped = pv.PolyData(points[mask])
+    if "colors" in scan_polydata.array_names:
+        cropped["colors"] = np.asarray(scan_polydata["colors"])[mask]
+    return cropped
 
 
 def _draw_scan_and_target(
@@ -64,7 +92,7 @@ def _draw_scan_and_target(
 ) -> None:
     """현재 active subplot 에 배경·점군·타겟 sphere·좌표축을 일괄 추가."""
 
-    plot_view.set_background("white", top="gray")
+    plot_view.set_background(COLOR_BACKGROUND)
     if scan_polydata is not None:
         if has_color:
             plot_view.add_mesh(scan_polydata, scalars="colors", rgb=True, point_size=2)
@@ -80,14 +108,17 @@ def render_pipe(
     target_point: tuple[float, float, float] | np.ndarray,
     sphere_radius: float = 0.01,
 ) -> None:
-    """4 subplot 에 배관 점군 + 검사 포인트 sphere 만 표시."""
+    """4 plotter 에 배관 점군 + 검사 포인트 sphere 만 표시 (포인트 주변 줌)."""
 
-    has_color = scan_polydata is not None and "colors" in scan_polydata.array_names
     target = np.asarray(target_point, dtype=float)
+    cropped = _crop_polydata_around(scan_polydata, target)
+    has_color = cropped is not None and "colors" in cropped.array_names
 
-    for _r, _c, _view_fn in for_each_subplot(plot_view):
-        _draw_scan_and_target(plot_view, scan_polydata, target, has_color, sphere_radius)
-    restore_camera_views(plot_view)
+    for plotter, view_fn in _iter_plotters(plot_view):
+        plotter.clear()
+        _draw_scan_and_target(plotter, cropped, target, has_color, sphere_radius)
+        getattr(plotter, view_fn)()
+        plotter.camera.parallel_projection = True
 
 
 def render_result(
@@ -103,18 +134,23 @@ def render_result(
     ``pose_groups`` 는 ``calculate_DDA_RT_pose_for_taking_xray`` 의 두 번째
     반환값. 각 dict 는 ``"0"`` / ``"90"`` 키를 가지며 그 아래 ``DDA`` /
     ``RT1`` / ``RT2`` 가 ``[x,y,z,r,p,y]`` 6-벡터.
+
+    검사 포인트 부분 확대를 위해 점군을 ``target_point ± CROP_HALF_EXTENT``
+    AABB 로 크롭한 뒤 4 subplot 에 그린다 (notebook cell ``1ea8ce44`` 와 동일).
     """
 
-    has_color = scan_polydata is not None and "colors" in scan_polydata.array_names
     target = np.asarray(target_point, dtype=float)
+    cropped = _crop_polydata_around(scan_polydata, target)
+    has_color = cropped is not None and "colors" in cropped.array_names
 
     dda_mesh = get_dda_mesh(optimizer)
     rt_mesh = get_rt_mesh(optimizer)
     dda_inv = get_dda_inv_transform(optimizer)
     rt_inv = get_rt_inv_transform(optimizer)
 
-    for _r, _c, _view_fn in for_each_subplot(plot_view):
-        _draw_scan_and_target(plot_view, scan_polydata, target, has_color, sphere_radius)
+    for plotter, view_fn in _iter_plotters(plot_view):
+        plotter.clear()
+        _draw_scan_and_target(plotter, cropped, target, has_color, sphere_radius)
 
         # 채택된 pose_group 모두 동시 표시 (0도/90도 색상 분리)
         for pg in pose_groups:
@@ -128,12 +164,74 @@ def render_result(
                 dda_pose = slot.get("DDA")
                 if dda_pose is not None:
                     T = link_transform_for_tcp_pose(dda_pose, dda_inv)
-                    jv.add_mesh(plot_view, dda_mesh, T, color=dda_color, show_edges=False)
+                    jv.add_mesh(plotter, dda_mesh, T, color=dda_color, show_edges=False)
                 for rt_key in ("RT1", "RT2"):
                     rt_pose = slot.get(rt_key)
                     if rt_pose is None:
                         continue
                     T = link_transform_for_tcp_pose(rt_pose, rt_inv)
-                    jv.add_mesh(plot_view, rt_mesh, T, color=rt_color, show_edges=False)
+                    jv.add_mesh(plotter, rt_mesh, T, color=rt_color, show_edges=False)
 
-    restore_camera_views(plot_view)
+        getattr(plotter, view_fn)()
+        plotter.camera.parallel_projection = True
+
+
+def render_overview(
+    plot_view: Any,
+    scan_polydata: Any,
+    points: list,
+    sphere_radius: float = 0.005,
+    label_font_size: int = 12,
+) -> None:
+    """단일 plotter 에 배관 전체 + 검사 포인트 sphere + 인덱스 라벨 표시.
+
+    notebook cell ``67e03b7d`` 의 가시화 정책을 그대로 따른다:
+      - offset 이 없는 포인트(``position == position_with_offset``): green sphere
+      - offset 이 있는 포인트: red(원본) + blue(표면 좌표) 두 sphere
+      - 모든 포인트에 인덱스 라벨 (검은색, ``always_visible=True``)
+    """
+
+    plot_view.clear()
+    plot_view.set_background(COLOR_BACKGROUND)
+
+    if scan_polydata is not None:
+        if "colors" in scan_polydata.array_names:
+            plot_view.add_mesh(scan_polydata, scalars="colors", rgb=True, point_size=2)
+        else:
+            plot_view.add_mesh(scan_polydata, color=COLOR_PIPE_DEFAULT, point_size=2)
+
+    label_positions: list = []
+    label_texts: list[str] = []
+    for point in points:
+        is_offset = not _positions_equal(point.position, point.position_with_offset)
+        if is_offset:
+            jv.add_sphere(plot_view, point.position, radius=sphere_radius, color=COLOR_INSPECTION_OFFSET)
+            jv.add_sphere(plot_view, point.position_with_offset, radius=sphere_radius, color=COLOR_DETECTION_OFFSET)
+        else:
+            jv.add_sphere(plot_view, point.position, radius=sphere_radius, color=COLOR_INSPECTION_NORMAL)
+        label_positions.append(point.position)
+        label_texts.append(str(point.index))
+
+    if label_positions:
+        # PyVista default: shape='rounded_rect', shape_color='lightgray' →
+        # 회색 배경에 검은색 글씨 (notebook cell 67e03b7d 와 동일).
+        plot_view.add_point_labels(
+            label_positions,
+            label_texts,
+            font_size=label_font_size,
+            point_color="black",
+            text_color="black",
+            always_visible=True,
+        )
+
+    plot_view.view_isometric()
+    # CAD 스타일 평행 투영 (멀어져도 평행선이 평행하게 보이도록).
+    plot_view.camera.parallel_projection = True
+
+
+def _positions_equal(
+    a: tuple[float, float, float],
+    b: tuple[float, float, float],
+    tol: float = 1e-9,
+) -> bool:
+    return all(abs(ai - bi) <= tol for ai, bi in zip(a, b))
