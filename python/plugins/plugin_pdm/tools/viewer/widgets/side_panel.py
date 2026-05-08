@@ -39,9 +39,11 @@ _STATUS_BG = {
 
 _TEXT_BLACK = QBrush(QColor("black"))
 
-# Stylesheet 는 ``QListWidget::item:selected`` 에 background 를 지정하지 않아
-# ``setBackground`` 로 그린 상태색이 그대로 보이도록 한다. 선택 강조는 굵은
-# 글씨 + 두꺼운 좌측 주황 테두리로만 처리.
+# IMPORTANT: ``QListWidget::item { ... }`` 규칙을 두면 Qt 의 stylesheet 기반
+# 페인팅이 활성화되어 ``QListWidgetItem.setBackground()`` 의 BackgroundRole 이
+# 무시된다. 그 결과 검사 진행 시 상태색(성공/실패)이 화면에 반영되지 않음.
+# 따라서 widget-level 규칙만 사용하고 ``::item`` 규칙은 절대 추가하지 않는다.
+# 선택 강조는 ``selection-background-color`` (반투명 오렌지) 로만 처리.
 _LIST_STYLESHEET = """
 QListWidget {
     background-color: white;
@@ -49,23 +51,8 @@ QListWidget {
     font-size: 11pt;
     outline: 0;
     border: 1px solid #909090;
-    selection-background-color: rgba(255, 102, 0, 110);
+    selection-background-color: rgba(255, 102, 0, 140);
     selection-color: black;
-}
-QListWidget::item {
-    color: black;
-    padding: 6px 10px;
-    border-left: 4px solid transparent;
-}
-QListWidget::item:selected {
-    color: black;
-    font-weight: bold;
-    border-left: 4px solid #ff6600;
-}
-QListWidget::item:selected:!active {
-    color: black;
-    font-weight: bold;
-    border-left: 4px solid #ff6600;
 }
 """
 
