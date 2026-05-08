@@ -1,9 +1,14 @@
 """PlotView 4-view 의 subplot 경계선 시각 검증.
 
-pytest-qt + (a) ``plot_view.screenshot()`` (VTK off-screen render)
-+ (b) ``plot_view.grab()`` (Qt OpenGL displayed pixels) 두 경로로
-PNG 를 만들어 ``tests/visual/_artifacts/`` 에 저장. 사람(또는 멀티모달
-LLM) 이 두 PNG 를 비교해 border 가 실제 화면에서 보이는지 확인한다.
+새 PlotView 는 4개의 독립 ``QtInteractor`` 를 ``QGridLayout`` 으로 묶은
+컨테이너 ``QWidget`` 이므로 단일 plotter API (``subplot``, ``screenshot``)
+가 없고 ``plotters()`` 를 통해 4개 plotter 에 직접 접근한다.
+
+각 plotter 에 더미 점군을 추가한 뒤 ``plotter.screenshot()`` 으로 quadrant
+별 PNG 를 ``tests/visual/_artifacts/`` 에 저장한다. 4 plotter 사이의 검정
+분할선은 layout spacing 으로 형성되므로 단일 plotter screenshot 만으로는
+보이지 않으며, 전체 화면 분할선 시각 검증은 ``_capture_viewer_window.ps1``
+(Win32 PrintWindow) 와 멀티모달 ``Read`` 로 수행한다.
 """
 
 from __future__ import annotations
@@ -32,8 +37,8 @@ def _make_dummy_polydata() -> pv.PolyData:
     return pv.PolyData(pts)
 
 
-def test_plotview_borders_vtk_screenshot(qtbot):
-    """VTK off-screen ``screenshot()`` 경로 — 항상 완전한 렌더링."""
+def test_plotview_renders_four_quadrants(qtbot):
+    """각 quadrant plotter 에 더미 점군을 추가하고 VTK off-screen 스크린샷 검증."""
 
     _ensure_artifact_dir()
     plot_view = PlotView()
@@ -43,44 +48,42 @@ def test_plotview_borders_vtk_screenshot(qtbot):
     qtbot.waitExposed(plot_view)
 
     pcd = _make_dummy_polydata()
-    for r, c in ((0, 0), (0, 1), (1, 0), (1, 1)):
-        plot_view.subplot(r, c)
-        plot_view.add_mesh(pcd, color="skyblue", point_size=3)
+    for plotter, _view_fn in plot_view.plotters():
+        plotter.add_mesh(pcd, color="skyblue", point_size=3)
+
     plot_view.render()
     qtbot.wait(500)
 
-    png_path = ARTIFACT_DIR / "plotview_4view_vtk_screenshot.png"
-    plot_view.screenshot(filename=str(png_path))
-    assert png_path.exists()
+    for plotter, view_fn in plot_view.plotters():
+        png_path = ARTIFACT_DIR / f"plotview_quadrant_{view_fn}.png"
+        plotter.screenshot(filename=str(png_path))
+        assert png_path.exists(), f"{png_path} 생성 실패"
+        # 각 quadrant 는 PlotView 의 1/4 크기라 빈 화면 PNG 도 1KB 정도 됨.
+        # 점군이 그려졌는지 sanity check 만 — 2KB 이상이면 의미 있는 픽셀 존재.
+        assert png_path.stat().st_size > 2000, f"{png_path} 가 비정상적으로 작음"
+
     plot_view.close()
 
 
-def test_plotview_borders_qt_grab(qtbot):
-    """Qt ``QWidget.grab()`` — 실제 화면에 표시되는 픽셀 (OpenGL 포함).
+def test_plotview_plotters_signature(qtbot):
+    """``PlotView.plotters()`` 가 정확히 4쌍을 반환하고 각 view_fn 이 plotter 에 존재한다."""
 
-    이 경로가 사용자가 실제로 보는 화면과 동일하다. ``screenshot()`` 과
-    이 PNG 가 다르면 QtInteractor 의 OpenGL 렌더가 border 를 그리지 않는
-    것 — 그 경우 Qt 위젯 레벨 우회가 필요하다.
-    """
-
-    _ensure_artifact_dir()
     plot_view = PlotView()
     qtbot.addWidget(plot_view)
-    plot_view.resize(1200, 800)
+    plot_view.resize(800, 600)
     plot_view.show()
     qtbot.waitExposed(plot_view)
 
-    pcd = _make_dummy_polydata()
-    for r, c in ((0, 0), (0, 1), (1, 0), (1, 1)):
-        plot_view.subplot(r, c)
-        plot_view.add_mesh(pcd, color="skyblue", point_size=3)
-    plot_view.render()
-    # OpenGL 페인트가 끝나도록 충분히 대기
-    qtbot.wait(800)
+    specs = plot_view.plotters()
+    assert len(specs) == 4
 
-    pixmap = plot_view.grab()
-    png_path = ARTIFACT_DIR / "plotview_4view_qt_grab.png"
-    pixmap.save(str(png_path))
-    assert png_path.exists()
-    assert png_path.stat().st_size > 5000
+    expected_view_fns = {"view_isometric", "view_xy", "view_xz", "view_yz"}
+    actual_view_fns = {view_fn for _, view_fn in specs}
+    assert actual_view_fns == expected_view_fns
+
+    for plotter, view_fn in specs:
+        assert hasattr(plotter, view_fn)
+        # 평행 투영 활성 확인 (PlotView.__init__ 에서 모두 활성화)
+        assert plotter.camera.parallel_projection is True
+
     plot_view.close()
