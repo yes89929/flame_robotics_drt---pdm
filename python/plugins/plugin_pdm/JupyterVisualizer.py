@@ -249,7 +249,7 @@ def visualize_mesh(
     if camera_pos is not None:
         pl.camera_position = camera_pos
 
-    pl.show()
+    # pl.show()
     return pl
 
 
