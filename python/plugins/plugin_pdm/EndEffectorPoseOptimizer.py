@@ -224,61 +224,114 @@ class EndEffectorPoseOptimizer:
     ) -> np.ndarray:
         """주어진 DDA 자세와 각도에 대해 RT 자세 계산.
 
+        RT 자세 조건:
+            - RT TCP의 X축이 DDA TCP의 중심을 향함
+            - DDA TCP와 RT TCP 간 거리는 distance_from_dda_to_rt
+            - DDA TCP의 XY 평면과 RT TCP의 XY 평면이 일치
+            - DDA TCP의 XY 평면에서 DDA TCP의 X축과 RT TCP의 X축이 ±angle_deg만큼 벌어짐
+
         Args:
             dda_tcp_pose: DDA TCP 자세 [x, y, z, roll, pitch, yaw].
-            angle_deg: RT 배치 각도 (도).
+            angle_deg: DDA X축과 RT X축 사이의 각도 (도). 양수면 DDA Z축 기준 반시계 방향.
             distance_from_dda_to_rt: DDA TCP와 RT TCP 사이의 거리 (m).
 
         Returns:
             np.ndarray: RT TCP 자세 [x, y, z, roll, pitch, yaw].
         """
+        # [DEBUG] 입력값 출력
+        if self.__is_debug_mode:
+            print(f"\n{'='*60}")
+            print(f"[DEBUG] __calculate_rt_pose_for_angle 호출")
+            print(f"  - dda_tcp_pose: {dda_tcp_pose}")
+            print(f"  - angle_deg: {angle_deg}")
+            print(f"  - distance_from_dda_to_rt: {distance_from_dda_to_rt}")
+
         # DDA TCP 좌표계에서 회전 행렬 추출
         dda_rot_matrix = R.from_euler("xyz", dda_tcp_pose[3:]).as_matrix()
         dda_x_axis = dda_rot_matrix[:, 0]  # DDA TCP X축
+        dda_y_axis = dda_rot_matrix[:, 1]  # DDA TCP Y축
         dda_z_axis = dda_rot_matrix[:, 2]  # DDA TCP Z축
+
+        # [DEBUG] DDA 좌표계 축 출력
+        if self.__is_debug_mode:
+            print(f"  - dda_x_axis: {dda_x_axis}, norm: {np.linalg.norm(dda_x_axis)}")
+            print(f"  - dda_y_axis: {dda_y_axis}, norm: {np.linalg.norm(dda_y_axis)}")
+            print(f"  - dda_z_axis: {dda_z_axis}, norm: {np.linalg.norm(dda_z_axis)}")
 
         # DDA TCP의 Z축 단위 벡터 (XY 평면의 법선)
         dda_z_axis_unit = dda_z_axis / np.linalg.norm(dda_z_axis)
 
         # 로드리게스 회전 공식으로 DDA X축을 DDA Z축 주위로 angle_deg만큼 회전
+        # 이 회전된 방향이 RT가 배치될 방향 (DDA에서 RT로 향하는 방향)
         cos_angle = np.cos(np.radians(angle_deg))
         sin_angle = np.sin(np.radians(angle_deg))
 
         k_cross_v = np.cross(dda_z_axis_unit, dda_x_axis)
         k_dot_v = np.dot(dda_z_axis_unit, dda_x_axis)
 
-        rt_y_direction = dda_x_axis * cos_angle + k_cross_v * sin_angle + dda_z_axis_unit * k_dot_v * (1 - cos_angle)
+        # DDA에서 RT로 향하는 방향 (DDA X축을 angle_deg만큼 회전)
+        dda_to_rt_direction = dda_x_axis * cos_angle + k_cross_v * sin_angle + dda_z_axis_unit * k_dot_v * (1 - cos_angle)
 
-        # RT TCP 위치: DDA TCP에서 RT Y축 방향으로 distance_from_dda_to_rt만큼 떨어진 위치
-        rt_position = dda_tcp_pose[:3] + rt_y_direction * distance_from_dda_to_rt
+        # [DEBUG] DDA to RT 방향 출력
+        if self.__is_debug_mode:
+            print(f"  - dda_to_rt_direction: {dda_to_rt_direction}, norm: {np.linalg.norm(dda_to_rt_direction)}")
+
+        # RT TCP 위치: DDA TCP에서 회전된 방향으로 distance_from_dda_to_rt만큼 떨어진 위치
+        rt_position = dda_tcp_pose[:3] + dda_to_rt_direction * distance_from_dda_to_rt
 
         # RT TCP 방향 계산
-        # RT TCP X축: RT TCP에서 DDA TCP를 바라보는 방향
-        rt_to_dda_vector = dda_tcp_pose[:3] - rt_position
-        rt_x_axis = rt_to_dda_vector / np.linalg.norm(rt_to_dda_vector)
+        # RT TCP X축: RT TCP에서 DDA TCP를 바라보는 방향 (= -dda_to_rt_direction)
+        rt_x_axis = -dda_to_rt_direction
+        rt_x_axis = rt_x_axis / np.linalg.norm(rt_x_axis)
 
-        # RT TCP Y축: 위에서 계산한 rt_y_direction 사용
-        rt_y_axis = rt_y_direction / np.linalg.norm(rt_y_direction)
+        # [DEBUG] RT X축 출력
+        if self.__is_debug_mode:
+            print(f"  - rt_x_axis: {rt_x_axis}, norm: {np.linalg.norm(rt_x_axis)}")
 
-        # RT TCP Z축: X축과 Y축의 외적으로 계산하여 올바른 직교 좌표계 구성
-        rt_z_axis = np.cross(rt_x_axis, rt_y_axis)
-        rt_z_axis = rt_z_axis / np.linalg.norm(rt_z_axis)
+        # RT TCP Z축: DDA Z축과 동일 (같은 XY 평면 공유)
+        rt_z_axis = dda_z_axis_unit
 
-        # Y축 재계산 (Z축과 X축의 외적으로 정확한 직교 좌표계 구성)
+        # RT TCP Y축: Z축과 X축의 외적으로 계산 (오른손 좌표계)
         rt_y_axis = np.cross(rt_z_axis, rt_x_axis)
         rt_y_axis = rt_y_axis / np.linalg.norm(rt_y_axis)
+
+        # [DEBUG] RT Y, Z 축 출력 및 직교 여부 확인
+        if self.__is_debug_mode:
+            dot_xy = np.dot(rt_x_axis, rt_y_axis)
+            dot_xz = np.dot(rt_x_axis, rt_z_axis)
+            dot_yz = np.dot(rt_y_axis, rt_z_axis)
+            print(f"  - rt_y_axis: {rt_y_axis}, norm: {np.linalg.norm(rt_y_axis)}")
+            print(f"  - rt_z_axis: {rt_z_axis}, norm: {np.linalg.norm(rt_z_axis)}")
+            print(f"  - dot(rt_x, rt_y): {dot_xy} (0에 가까워야 직교)")
+            print(f"  - dot(rt_x, rt_z): {dot_xz} (0에 가까워야 직교)")
+            print(f"  - dot(rt_y, rt_z): {dot_yz} (0에 가까워야 직교)")
 
         # RT TCP 회전 행렬 생성
         rt_rot_matrix = np.column_stack([rt_x_axis, rt_y_axis, rt_z_axis])
 
         # 회전 행렬의 유효성 검사
         det = np.linalg.det(rt_rot_matrix)
-        if det <= 0:
+
+        # [DEBUG] 회전 행렬 및 행렬식 출력
+        if self.__is_debug_mode:
+            print(f"  - rt_rot_matrix:\n{rt_rot_matrix}")
+            print(f"  - det(rt_rot_matrix): {det}")
+
+        if det < 0:
             # 좌수 좌표계인 경우 Z축의 방향을 뒤집어서 우수 좌표계로 변경
             rt_z_axis = -rt_z_axis
+            rt_y_axis = np.cross(rt_z_axis, rt_x_axis)
+            rt_y_axis = rt_y_axis / np.linalg.norm(rt_y_axis)
             rt_rot_matrix = np.column_stack([rt_x_axis, rt_y_axis, rt_z_axis])
+            if self.__is_debug_mode:
+                print(f"  - det < 0이므로 Z축 반전 적용")
 
         rt_rpy = R.from_matrix(rt_rot_matrix).as_euler("xyz")
+
+        # [DEBUG] 최종 결과 출력
+        if self.__is_debug_mode:
+            print(f"  - rt_rpy (결과): {rt_rpy}")
+            print(f"{'='*60}\n")
 
         # RT TCP 자세 [x, y, z, roll, pitch, yaw]
         return np.hstack([rt_position, rt_rpy])
@@ -304,7 +357,7 @@ class EndEffectorPoseOptimizer:
             - RT TCP의 X축이 DDA TCP의 중심을 향함
             - DDA TCP와 RT TCP 간 거리는 distance_from_dda_to_rt
             - DDA TCP의 XY 평면과 RT TCP의 XY 평면이 일치
-            - DDA TCP의 XY 평면에서 DDA TCP의 X축과 RT TCP의 Y축이 ±angle_of_rt만큼 벌어짐
+            - DDA TCP의 XY 평면에서 DDA TCP의 X축과 RT TCP의 X축이 ±angle_of_rt만큼 벌어짐
             - 배관과 충돌하지 않음
 
         Args:
@@ -319,6 +372,8 @@ class EndEffectorPoseOptimizer:
                 - JSON str 형식: 그룹화된 DDA-RT 자세 쌍
                 - dict 형식: 그룹화된 DDA-RT 자세 쌍
         """
+        if self.__is_debug_mode:
+            self.debuging_info = {}
 
         # DDA 자세 후보 생성------------------------------------------------------
         dda_base_candidates = self.__calculate_dda_pose_candidate(
@@ -326,6 +381,9 @@ class EndEffectorPoseOptimizer:
             self.__pipe_radius + distance_from_dda_to_surface,
             num_candidates,
         )
+
+        if self.__is_debug_mode:
+            self.debuging_info["dda_base_candidates"] = dda_base_candidates
 
         # 배관과 충돌하지 않는 DDA 기본 자세만 필터링---------------------------------
         valid_base_dda_poses = []
@@ -338,8 +396,12 @@ class EndEffectorPoseOptimizer:
             if not is_collision:
                 valid_base_dda_poses.append(dda_pose)
 
+        if self.__is_debug_mode:
+            self.debuging_info["valid_base_dda_poses"] = valid_base_dda_poses
+
         # DDA-RT 자세 그룹 생성---------------------------------------------------
         pose_groups = []
+        collision_pose_groups = []  # 충돌하는 자세 그룹을 따로 저장
 
         for base_dda_pose in valid_base_dda_poses:
             group_data = {}
@@ -366,9 +428,18 @@ class EndEffectorPoseOptimizer:
                 if group_90_data:
                     group_data["90"] = group_90_data
 
-            # "0"과 "90" 모두 유효할 때만 그룹에 추가
+            # "0"과 "90" 모두 유효할 때만 그룹에 추가, 그렇지 않으면 충돌 그룹에 추가
             if "0" in group_data and "90" in group_data:
                 pose_groups.append(group_data)
+            else:
+                # 부분적으로라도 데이터가 있으면 충돌 그룹에 저장
+                if self.__is_debug_mode:
+                    if group_data:
+                        collision_pose_groups.append(group_data)
+
+        # 디버그 모드일 때 충돌 그룹 정보 저장
+        if self.__is_debug_mode:
+            self.debuging_info["collision_pose_groups"] = collision_pose_groups
 
         # JSON 형태 출력 생성-----------------------------------------------------
         pose_groups_json = json.dumps(pose_groups)
