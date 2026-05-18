@@ -7,6 +7,7 @@ from pathlib import Path
 from tools.viewer.models import (
     InspectionPoint,
     InspectionResult,
+    OptimizationMode,
     PipeData,
     PointStatus,
 )
@@ -55,3 +56,33 @@ def test_pipe_data_is_immutable_pathy() -> None:
     )
     assert pipe.pipe_id == "PIPE NO.1"
     assert pipe.ply_path == Path("a.ply")
+
+
+# ============================================================================
+# OptimizationMode + InspectionResult.mode (3-pair 120° GUI 통합)
+# ============================================================================
+
+
+def test_optimization_mode_has_expected_members() -> None:
+    """모드 enum 이 정확히 2-쌍 90° 와 3-쌍 120° 두 멤버만 노출."""
+
+    assert {m.name for m in OptimizationMode} == {"TWO_PAIR_90", "THREE_PAIR_120"}
+
+
+def test_inspection_result_default_mode_is_two_pair_90() -> None:
+    """기본값이 기존 2-쌍 90° → 회귀 호환 (mode 인자 없는 호출 경로 보호)."""
+
+    result = InspectionResult(point_index=1, success=True)
+    assert result.mode is OptimizationMode.TWO_PAIR_90
+
+
+def test_inspection_result_mode_can_be_three_pair_120() -> None:
+    """신규 3-쌍 120° 결과 표현 가능 검증."""
+
+    result = InspectionResult(
+        point_index=2,
+        success=True,
+        pose_groups=[{"0": {"DDA": [0, 0, 0, 0, 0, 0]}}],
+        mode=OptimizationMode.THREE_PAIR_120,
+    )
+    assert result.mode is OptimizationMode.THREE_PAIR_120

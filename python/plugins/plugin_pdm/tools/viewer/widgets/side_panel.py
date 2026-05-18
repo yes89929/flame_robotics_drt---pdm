@@ -2,9 +2,10 @@
 
 위→아래 순서:
   1. 배관 데이터 콤보
-  2. "엔드이펙터 최적 위치 탐지" 버튼
-  3. 배관 전체 오버뷰 위젯 (점군 + 검사 포인트 sphere + 인덱스 라벨)
-  4. 검사 포인트 목록 (글자색 검정, 선택 항목 굵은 표시)
+  2. 자세 계산 모드 콤보 (2쌍 90° / 3쌍 120°) — ``mode_changed`` 시그널
+  3. "엔드이펙터 최적 위치 탐지" 버튼
+  4. 배관 전체 오버뷰 위젯 (점군 + 검사 포인트 sphere + 인덱스 라벨)
+  5. 검사 포인트 목록 (글자색 검정, 선택 항목 굵은 표시)
 
 사용자 액션은 시그널로만 외부에 노출하며 내부 상태는 없다 (MainWindow 가
 단일 출처). 오버뷰 위젯은 ``update_overview()`` 로 외부에서 재렌더링한다.
@@ -27,7 +28,7 @@ from PyQt6.QtWidgets import (
 )
 from pyvistaqt import QtInteractor
 
-from ..models import InspectionPoint, PointStatus
+from ..models import InspectionPoint, OptimizationMode, PointStatus
 from ..viz import scene_builder
 
 # 시스템 다크 테마에서도 가시성을 유지하기 위해 채도/명도를 강하게 잡는다.
@@ -71,9 +72,17 @@ def _force_light_palette(widget: QWidget) -> None:
 
 
 class SidePanel(QWidget):
-    pipe_changed = pyqtSignal(int)            # 콤보 currentIndex
+    pipe_changed = pyqtSignal(int)              # 콤보 currentIndex
     optimize_clicked = pyqtSignal()
-    point_selected = pyqtSignal(int)          # InspectionPoint.index
+    point_selected = pyqtSignal(int)            # InspectionPoint.index
+    mode_changed = pyqtSignal(object)           # OptimizationMode
+
+    # ComboBox 의 displayed label → enum 매핑.
+    # 순서대로 콤보에 채워지며, 첫 항목이 기본 선택값.
+    _MODE_LABEL_TO_ENUM: dict[str, OptimizationMode] = {
+        "2쌍 90° (기존)": OptimizationMode.TWO_PAIR_90,
+        "3쌍 120° (신규, 2쌍 폴백)": OptimizationMode.THREE_PAIR_120,
+    }
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -85,6 +94,13 @@ class SidePanel(QWidget):
         layout.addWidget(QLabel("배관 데이터"))
         self._combo = QComboBox(self)
         layout.addWidget(self._combo)
+
+        # 자세 계산 모드 토글 (2쌍 90° vs 3쌍 120°)
+        layout.addWidget(QLabel("자세 계산 모드"))
+        self._mode_combo = QComboBox(self)
+        for label in self._MODE_LABEL_TO_ENUM:
+            self._mode_combo.addItem(label)
+        layout.addWidget(self._mode_combo)
 
         self._optimize_btn = QPushButton("엔드이펙터 최적 위치 탐지", self)
         self._optimize_btn.setEnabled(False)
@@ -112,6 +128,7 @@ class SidePanel(QWidget):
 
         # 시그널 라우팅
         self._combo.currentIndexChanged.connect(self._on_combo_changed)
+        self._mode_combo.currentIndexChanged.connect(self._on_mode_combo_changed)
         self._optimize_btn.clicked.connect(self.optimize_clicked.emit)
         self._list.currentItemChanged.connect(self._on_list_item_changed)
 
@@ -165,6 +182,17 @@ class SidePanel(QWidget):
     def set_optimize_label(self, text: str) -> None:
         self._optimize_btn.setText(text)
 
+    def current_mode(self) -> OptimizationMode:
+        """현재 모드 콤보의 enum 값. UI 초기 상태 조회·재진입 시 사용."""
+
+        label = self._mode_combo.currentText()
+        return self._MODE_LABEL_TO_ENUM.get(label, OptimizationMode.TWO_PAIR_90)
+
+    def set_mode_combo_enabled(self, enabled: bool) -> None:
+        """배치 실행 중에는 모드 토글을 잠가 race 를 방지."""
+
+        self._mode_combo.setEnabled(enabled)
+
     def update_overview(
         self,
         scan_polydata: Any,
@@ -191,6 +219,9 @@ class SidePanel(QWidget):
 
     def _on_combo_changed(self, index: int) -> None:
         self.pipe_changed.emit(index)
+
+    def _on_mode_combo_changed(self, _index: int) -> None:
+        self.mode_changed.emit(self.current_mode())
 
     def _on_list_item_changed(
         self,

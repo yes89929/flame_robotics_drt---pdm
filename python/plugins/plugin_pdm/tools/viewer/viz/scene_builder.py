@@ -11,10 +11,13 @@ PyVista ``Plotter(shape=(2,2))`` 의 4 subplot (iso/XY/XZ/YZ) 에 동일한 객�
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Iterable
 
 import numpy as np
 import pyvista as pv
+
+logger = logging.getLogger(__name__)
 
 # JupyterVisualizer 는 plugin_pdm 루트에서 직접 import (sys.path 가드 후).
 import JupyterVisualizer as jv  # type: ignore
@@ -27,11 +30,26 @@ from .visualizer_adapter import (
     link_transform_for_tcp_pose,
 )
 
-# 노트북 demo cell 1ea8ce44 의 색상 정책
+# 노트북 demo cell 1ea8ce44 의 색상 정책 + 3-쌍 120° 확장
 COLOR_DDA_0DEG: tuple[int, int, int] = (255, 150, 150)
 COLOR_DDA_90DEG: tuple[int, int, int] = (150, 150, 255)
+COLOR_DDA_120DEG: tuple[int, int, int] = (150, 255, 150)   # 신규 — 녹색 계열
+COLOR_DDA_240DEG: tuple[int, int, int] = (255, 220, 150)   # 신규 — 주황 계열
 COLOR_RT_0DEG: tuple[int, int, int] = (255, 150, 150)
 COLOR_RT_90DEG: tuple[int, int, int] = (150, 150, 255)
+COLOR_RT_120DEG: tuple[int, int, int] = (150, 255, 150)
+COLOR_RT_240DEG: tuple[int, int, int] = (255, 220, 150)
+COLOR_DDA_UNKNOWN: tuple[int, int, int] = (180, 180, 180)  # fallback (회색)
+COLOR_RT_UNKNOWN: tuple[int, int, int] = (180, 180, 180)
+
+# 키 = 이상 라벨 문자열. EndEffectorPoseOptimizer의 두 함수 모두 이상 라벨 키를 사용함.
+# module-level private (`_` prefix). 테스트에서 import 가능 (AC #11 viewer 매핑 회귀).
+_KEY_TO_COLOR: dict[str, tuple[tuple[int, int, int], tuple[int, int, int]]] = {
+    "0":   (COLOR_DDA_0DEG,   COLOR_RT_0DEG),
+    "90":  (COLOR_DDA_90DEG,  COLOR_RT_90DEG),
+    "120": (COLOR_DDA_120DEG, COLOR_RT_120DEG),
+    "240": (COLOR_DDA_240DEG, COLOR_RT_240DEG),
+}
 
 COLOR_PIPE_DEFAULT: str = "skyblue"     # 점군 기본 색 (사용자 지정: 하늘색)
 COLOR_TARGET_SPHERE: str = "red"
@@ -152,15 +170,22 @@ def render_result(
         plotter.clear()
         _draw_scan_and_target(plotter, cropped, target, has_color, sphere_radius)
 
-        # 채택된 pose_group 모두 동시 표시 (0도/90도 색상 분리)
+        # 채택된 pose_group 모두 동시 표시.
+        # 그룹 dict의 키 = 이상 라벨 문자열 ("0"/"90"/"120"/"240").
+        # 메타 필드 (_actual_deg, _arc_deg)는 그룹이 아닌 *슬롯* 안에 들어가며,
+        # 아래에서는 slot.get("DDA"/"RT1"/"RT2")로만 명시 접근하므로 메타가
+        # 렌더 경로에 새는 일이 없음 → 그룹 키 skip 가드 불필요.
         for pg in pose_groups:
-            for angle_key, dda_color, rt_color in (
-                ("0", COLOR_DDA_0DEG, COLOR_RT_0DEG),
-                ("90", COLOR_DDA_90DEG, COLOR_RT_90DEG),
-            ):
-                if angle_key not in pg:
-                    continue
-                slot = pg[angle_key]
+            for angle_key, slot in pg.items():
+                if angle_key in _KEY_TO_COLOR:
+                    dda_color, rt_color = _KEY_TO_COLOR[angle_key]
+                else:
+                    dda_color, rt_color = COLOR_DDA_UNKNOWN, COLOR_RT_UNKNOWN
+                    logger.warning(
+                        "scene_builder.render_result: unknown angle key %r in pose_group; "
+                        "falling back to UNKNOWN color",
+                        angle_key,
+                    )
                 dda_pose = slot.get("DDA")
                 if dda_pose is not None:
                     T = link_transform_for_tcp_pose(dda_pose, dda_inv)

@@ -8,6 +8,7 @@ from pathlib import Path
 from scipy.spatial.transform import Rotation as R
 import json
 import copy
+import math
 from typing import Any
 
 
@@ -445,6 +446,181 @@ class EndEffectorPoseOptimizer:
         pose_groups_json = json.dumps(pose_groups)
 
         return pose_groups_json, pose_groups
+
+    def calculate_DDA_RT_pose_for_taking_xray_3pair_120(
+        self,
+        target_point: tuple[float, float, float] | np.ndarray,
+        distance_from_dda_to_surface: float,
+        distance_from_dda_to_rt: float,
+        angle_of_rt: float,
+        candidate_step_deg: float = 3.0,
+        gap_tolerance_deg: float = 10.0,
+        allow_2pair_fallback: bool = True,
+    ) -> tuple[str, list[dict]]:
+        """x-ray 촬영을 위한 DDA, RT 자세 3-쌍 (120° 간격) 조합 계산.
+
+        배관 둘레에 candidate_step_deg 간격으로 후보 자세를 생성하고,
+        인접 간격이 모두 |gap - 120°| ≤ gap_tolerance_deg인 충돌-자유 3-조합
+        중 편차 합이 최소인 1개를 반환한다.
+
+        3-조합이 존재하지 않고 allow_2pair_fallback=True이면 두 후보 사이의
+        호 간격이 |gap - 120°| ≤ gap_tolerance_deg인 2-조합 중 편차 최소
+        1개를 반환한다.
+
+        Args:
+            target_point: 직배관 표면 위의 한 점.
+            distance_from_dda_to_surface: DDA TCP와 배관 표면 사이의 거리 (m).
+            distance_from_dda_to_rt: DDA TCP와 RT TCP 사이의 거리 (m).
+            angle_of_rt: RT TCP X축과 DDA TCP X축 사이의 각도 (degree).
+            candidate_step_deg: 배관 둘레 후보 생성 간격 (degree). Defaults to 3.0.
+                num_candidates는 int(round(360 / candidate_step_deg))로 결정됨.
+            gap_tolerance_deg: 인접 간격의 이상값 120°에서 허용 편차 (degree).
+                Defaults to 10.0. 박스 제약: 모든 인접 간격이 [120-tol, 120+tol] 안.
+            allow_2pair_fallback: 3-조합 불가 시 2-쌍 폴백 활성화 여부.
+                Defaults to True.
+
+        Returns:
+            tuple[str, list[dict]]: (json_str, pose_groups)
+                pose_groups는 0개 또는 1개의 그룹을 담은 리스트.
+                그룹 안의 키는 회전각 문자열 ("0", "120", "240" 또는 폴백 시 "0", "120"),
+                값 슬롯 구조는 기존 90° 함수와 동일 {"DDA":[...], "RT1":[...], "RT2":[...]}에
+                추가 메타 `_actual_deg: int` (실측 양자화 각도).
+                폴백 시에는 추가로 `_arc_deg: int` (채택된 호의 실측 각도)도 두 슬롯 모두에 추가.
+        """
+        # 입력 검증 (방어적 가드, Security review L-2) --------------------------
+        # NaN/inf로 인한 산술/논리 비교 무력화 방지 및 박스 제약(tol < 60°) 강제.
+        for _name, _val in (
+            ("distance_from_dda_to_surface", distance_from_dda_to_surface),
+            ("distance_from_dda_to_rt", distance_from_dda_to_rt),
+            ("angle_of_rt", angle_of_rt),
+            ("candidate_step_deg", candidate_step_deg),
+            ("gap_tolerance_deg", gap_tolerance_deg),
+        ):
+            if not math.isfinite(_val):
+                raise ValueError(f"{_name} must be finite, got {_val!r}")
+        if candidate_step_deg <= 0:
+            raise ValueError(f"candidate_step_deg must be > 0, got {candidate_step_deg}")
+        if not (0.0 <= gap_tolerance_deg < 60.0):
+            raise ValueError(
+                f"gap_tolerance_deg must be in [0, 60), got {gap_tolerance_deg}"
+            )
+        _tp = np.asarray(target_point, dtype=float)
+        if _tp.shape != (3,) or not bool(np.all(np.isfinite(_tp))):
+            raise ValueError(f"target_point must be 3 finite floats, got {target_point!r}")
+
+        # 후보 자세 생성 -----------------------------------------------------
+        num_candidates = int(round(360.0 / candidate_step_deg))
+        step_deg = 360.0 / num_candidates  # 보정된 실제 step (정수 N 보장)
+
+        dda_base_candidates = self.__calculate_dda_pose_candidate(
+            np.asarray(target_point),
+            self.__pipe_radius + distance_from_dda_to_surface,
+            num_candidates,
+        )
+
+        # 각 인덱스별 슬롯 결과 (None = 무효, dict = 유효) ----------------------
+        slot_results: list[dict | None] = []
+        for dda_pose in dda_base_candidates:
+            if self.__check_collision(self.__dda_mesh, dda_pose, self.__dda_invers_transform_mat):
+                slot_results.append(None)
+                continue
+            slot = self.__process_dda_rt_combination(dda_pose, angle_of_rt, distance_from_dda_to_rt)
+            slot_results.append(slot)  # __process_dda_rt_combination이 None 반환 가능
+
+        # enumerate 순서가 곧 정렬 순서이므로 i < j < k가 자연 보장.
+        valid_indices = sorted(i for i, s in enumerate(slot_results) if s is not None)
+        valid_set = set(valid_indices)
+
+        # 3-조합 탐색 + 편차 최소 선택 ----------------------------------------
+        # 부동소수 정밀도 안전을 위해 작은 epsilon을 ceil/floor에 적용.
+        EPS = 1e-9
+        ideal_idx_gap = num_candidates / 3.0
+        tol_idx = gap_tolerance_deg / step_deg
+        min_gap = int(np.ceil(ideal_idx_gap - tol_idx - EPS))
+        max_gap = int(np.floor(ideal_idx_gap + tol_idx + EPS))
+
+        best_triple: tuple[int, int, int] | None = None
+        best_deviation_sum: float = float("inf")
+
+        # i < j < k 정렬 순회로 회전대칭 중복 자동 제거.
+        # gap3은 닫힌 호 (k → wrap → i) 길이.
+        for i in valid_indices:
+            for gap1 in range(min_gap, max_gap + 1):
+                j = i + gap1
+                if j >= num_candidates or j not in valid_set:
+                    continue
+                for gap2 in range(min_gap, max_gap + 1):
+                    k = j + gap2
+                    if k >= num_candidates or k not in valid_set:
+                        continue
+                    gap3 = num_candidates - gap1 - gap2
+                    if not (min_gap <= gap3 <= max_gap):
+                        continue
+                    # 박스 제약 사후 재확인 가드 (부동소수 안전, 두 번째 방어선).
+                    ang_gaps = (gap1 * step_deg, gap2 * step_deg, gap3 * step_deg)
+                    if any(abs(ag - 120.0) > gap_tolerance_deg + EPS for ag in ang_gaps):
+                        continue
+                    dev = sum(abs(ag - 120.0) for ag in ang_gaps)
+                    if best_triple is None \
+                            or dev < best_deviation_sum \
+                            or (dev == best_deviation_sum and (i, j, k) < best_triple):
+                        best_deviation_sum = dev
+                        best_triple = (i, j, k)
+
+        # 3-조합 결과 패키징 (이상 라벨 + 실측 메타) ---------------------------
+        if best_triple is not None:
+            pose_groups: list[dict] = [{}]
+            group = pose_groups[0]
+            for idx, ideal_label in zip(best_triple, ("0", "120", "240")):
+                slot = dict(slot_results[idx])  # type: ignore[arg-type]  # 얕은 복사로 원본 보존
+                slot["_actual_deg"] = int(round(idx * step_deg))
+                group[ideal_label] = slot
+            return json.dumps(pose_groups), pose_groups
+
+        # 2-쌍 폴백 탐색 -----------------------------------------------------
+        if not allow_2pair_fallback:
+            return "[]", []
+
+        best_pair: tuple[int, int] | None = None
+        best_pair_deviation: float = float("inf")
+        best_pair_arc_deg: int = 0
+        for i in valid_indices:
+            for j in valid_indices:
+                if j <= i:
+                    continue
+                gap_deg = (j - i) * step_deg
+                other_deg = 360.0 - gap_deg
+                # 두 호 중 [120-tol, 120+tol]에 들어가는 쪽 채택.
+                # 가정 (tol < 60°): 두 호의 합은 360°. 두 호 모두 [120-tol, 120+tol]에
+                # 들어가려면 tol ≥ 60°가 필요하므로 기본 tol=10°에서는 서로 배타적.
+                # tol ≥ 60° 호출은 spec 범위 밖이며 그 경우 if/elif에 의해
+                # 짧은 쪽(더 작은 j-i)이 우선 선택됨.
+                if abs(gap_deg - 120.0) <= gap_tolerance_deg:
+                    chosen_dev = abs(gap_deg - 120.0)
+                    chosen_arc = int(round(gap_deg))
+                elif abs(other_deg - 120.0) <= gap_tolerance_deg:
+                    chosen_dev = abs(other_deg - 120.0)
+                    chosen_arc = int(round(other_deg))
+                else:
+                    continue
+                if best_pair is None \
+                        or chosen_dev < best_pair_deviation \
+                        or (chosen_dev == best_pair_deviation and (i, j) < best_pair):
+                    best_pair_deviation = chosen_dev
+                    best_pair = (i, j)
+                    best_pair_arc_deg = chosen_arc
+
+        if best_pair is None:
+            return "[]", []
+
+        pose_groups = [{}]
+        group = pose_groups[0]
+        for idx, ideal_label in zip(best_pair, ("0", "120")):
+            slot = dict(slot_results[idx])  # type: ignore[arg-type]
+            slot["_actual_deg"] = int(round(idx * step_deg))
+            slot["_arc_deg"] = best_pair_arc_deg
+            group[ideal_label] = slot
+        return json.dumps(pose_groups), pose_groups
 
     def __process_dda_rt_combination(
         self,

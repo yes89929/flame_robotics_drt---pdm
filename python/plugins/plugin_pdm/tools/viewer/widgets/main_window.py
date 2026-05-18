@@ -32,7 +32,13 @@ from PyQt6.QtWidgets import (
 
 from .. import app_paths
 from ..data_loader import discover_pipes, load_inspection_points
-from ..models import InspectionPoint, InspectionResult, PipeData, PointStatus
+from ..models import (
+    InspectionPoint,
+    InspectionResult,
+    OptimizationMode,
+    PipeData,
+    PointStatus,
+)
 from ..workers.batch_worker import BatchWorker
 from ..workers.pcd_loader import PointCloudLoader
 from .plot_view import PlotView
@@ -55,6 +61,8 @@ class MainWindow(QMainWindow):
         self._results: dict[int, InspectionResult] = {}
         self._current_polydata: Any = None
         self._scan_loaded_for_pipe: str | None = None
+        # 자세 계산 모드 — SidePanel 콤보의 현재 선택을 거울 (단일 출처).
+        self._current_mode: OptimizationMode = OptimizationMode.TWO_PAIR_90
 
         # ---- optimizer 1회 생성 + URDF 로드 (메인 스레드, 1회성 비용) ----
         from EndEffectorPoseOptimizer import EndEffectorPoseOptimizer  # type: ignore
@@ -93,6 +101,9 @@ class MainWindow(QMainWindow):
         self._side_panel.pipe_changed.connect(self._on_pipe_combo_changed)
         self._side_panel.optimize_clicked.connect(self._on_optimize_clicked)
         self._side_panel.point_selected.connect(self._on_point_selected)
+        self._side_panel.mode_changed.connect(self._on_mode_changed)
+        # SidePanel 콤보 기본값과 내부 상태 sync (초기 1회).
+        self._current_mode = self._side_panel.current_mode()
 
         # ---- 데이터 디스커버리 + 콤보 채우기 ------------------------------
         self._pipes = discover_pipes()
@@ -216,15 +227,64 @@ class MainWindow(QMainWindow):
             self._side_panel.update_point_status(list_pos, PointStatus.UNRUN)
         self._reset_progress(total=len(self._current_points))
         self._side_panel.set_optimize_enabled(False)
+        # 실행 중에는 모드 변경 잠금 — race 회피 (worker 가 생성 시점의 mode 로 동작)
+        self._side_panel.set_mode_combo_enabled(False)
 
-        worker = BatchWorker(self._optimizer, self._current_points, parent=self)
+        worker = BatchWorker(
+            self._optimizer,
+            self._current_points,
+            parent=self,
+            mode=self._current_mode,
+        )
         worker.point_done.connect(self._on_batch_point_done)
         worker.progress.connect(self._on_batch_progress)
         worker.batch_finished.connect(self._on_batch_finished)
         worker.batch_aborted.connect(self._on_batch_aborted)
         self._batch_worker = worker
         worker.start()
-        self.statusBar().showMessage(f"{self._current_pipe.pipe_id} — 일괄 자세 탐지 시작 ({len(self._current_points)}개)…")
+        mode_label = (
+            "3쌍 120°" if self._current_mode is OptimizationMode.THREE_PAIR_120 else "2쌍 90°"
+        )
+        self.statusBar().showMessage(
+            f"{self._current_pipe.pipe_id} — 일괄 자세 탐지 시작 "
+            f"({len(self._current_points)}개, {mode_label})…"
+        )
+
+    def _on_mode_changed(self, mode: OptimizationMode) -> None:
+        """SidePanel 모드 콤보 변경 → 내부 상태 갱신 + 이전 결과 무효화.
+
+        모드별로 pose_group 키 정책 (\"0\"/\"90\" vs \"0\"/\"120\"/\"240\")이 다르고
+        viewer 의 색상도 달라지므로, 같은 검사 포인트라도 모드가 바뀌면 결과를
+        새로 계산해야 한다. 기존 결과는 한 번에 무효화하고 포인트 라벨도 UNRUN
+        으로 리셋한다.
+        """
+
+        if mode is self._current_mode:
+            return
+        self._current_mode = mode
+        # 이전 결과 무효화 — 다른 알고리즘으로 다시 탐지해야 함
+        self._results.clear()
+        for list_pos in range(len(self._current_points)):
+            self._side_panel.update_point_status(list_pos, PointStatus.UNRUN)
+        self._reset_progress(total=len(self._current_points))
+        # 현재 선택된 검사 포인트는 배관-only 로 다시 렌더 (이전 자세 메시 제거)
+        current_index = self._side_panel_current_point_index()
+        if current_index is not None:
+            self._render_for_index(current_index)
+
+    def _side_panel_current_point_index(self) -> int | None:
+        """SidePanel 의 현재 선택 항목 index — 모드 전환 시 재렌더에 사용."""
+
+        # SidePanel 내부 list 의 currentItem 을 통해 안전하게 조회
+        try:
+            item = self._side_panel._list.currentItem()  # noqa: SLF001
+        except AttributeError:
+            return None
+        if item is None:
+            return None
+        from PyQt6.QtCore import Qt as _Qt
+        value = item.data(_Qt.ItemDataRole.UserRole)
+        return value if isinstance(value, int) else None
 
     def _on_batch_point_done(self, result: InspectionResult) -> None:
         self._results[result.point_index] = result
@@ -249,6 +309,7 @@ class MainWindow(QMainWindow):
 
     def _on_batch_finished(self) -> None:
         self._side_panel.set_optimize_enabled(True)
+        self._side_panel.set_mode_combo_enabled(True)
         self.statusBar().showMessage(
             f"{self._current_pipe.pipe_id if self._current_pipe else ''} — 일괄 탐지 완료."
         )
@@ -256,6 +317,7 @@ class MainWindow(QMainWindow):
 
     def _on_batch_aborted(self, reason: str) -> None:
         self._side_panel.set_optimize_enabled(True)
+        self._side_panel.set_mode_combo_enabled(True)
         self.statusBar().showMessage(f"일괄 탐지 중단: {reason}")
         self._batch_worker = None
 
