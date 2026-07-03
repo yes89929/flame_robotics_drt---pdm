@@ -34,8 +34,10 @@ _PIPE_DIRECTION = "_EndEffectorPoseOptimizer__pipe_direction"
 _PIPE_CENTER = "_EndEffectorPoseOptimizer__pipe_center"
 _PIPE_RADIUS = "_EndEffectorPoseOptimizer__pipe_radius"
 _DDA_MESH = "_EndEffectorPoseOptimizer__dda_mesh"
+_DDA_COLLISION = "_EndEffectorPoseOptimizer__dda_collision"
 _DDA_INV = "_EndEffectorPoseOptimizer__dda_invers_transform_mat"
 _RT_MESH = "_EndEffectorPoseOptimizer__rt_mesh"
+_RT_COLLISION = "_EndEffectorPoseOptimizer__rt_collision"
 _RT_INV = "_EndEffectorPoseOptimizer__rt_invers_transform_mat"
 _CHECK_COLLISION = "_EndEffectorPoseOptimizer__check_collision"
 _PROCESS_COMBO = "_EndEffectorPoseOptimizer__process_dda_rt_combination"
@@ -57,9 +59,12 @@ def _make_mock_optimizer():
     setattr(opt, _PIPE_DIRECTION, np.array([0.0, 1.0, 0.0]))
     setattr(opt, _PIPE_CENTER, np.array([0.0, 0.0, 0.0]))
     setattr(opt, _PIPE_RADIUS, 0.05)
-    # mesh/inverse는 mock된 함수에만 전달되므로 placeholder.
+    # collision/mesh/inverse는 mock된 함수(__check_collision)에만 전달되므로 placeholder.
+    # 저장형태 재정리 후 __check_collision 은 collision element 리스트를 인자로 받는다.
+    setattr(opt, _DDA_COLLISION, [])
     setattr(opt, _DDA_MESH, object())
     setattr(opt, _DDA_INV, np.eye(4))
+    setattr(opt, _RT_COLLISION, [])
     setattr(opt, _RT_MESH, object())
     setattr(opt, _RT_INV, np.eye(4))
     return opt
