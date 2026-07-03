@@ -6,7 +6,8 @@
 
 검증 대상:
     - 다중 <collision> 순회 + Box/Mesh 타입 분기 (dda=box8, rt=box7+mesh1)
-    - collision.origin rpy 를 URDF 표준 고정축 XYZ(대문자, extrinsic) 로 해석
+    - collision.origin rpy 를 scipy intrinsic "xyz"(소문자) 로 해석 (URDF 표준 아님;
+      model_simplifier 저작 규약. 구 상세 mesh 형상과 라운드트립으로 확인)
     - 회전 박스(rpy 2축)의 world 배치 라운드트립
     - mesh 경로 resolve (file:// 및 순수 상대경로)
     - 기존 단일-mesh URDF 하위호환
@@ -99,14 +100,16 @@ def test_rotated_box_roundtrip_and_convention(loaded):
     """DDA box[5] (rpy=[-1.5708,-1.5708,0], 2축 회전)의 origin 변환 라운드트립.
 
     joint_tcp origin 이 identity 라 TCP==link_end 이므로, 요소 T 의 translation 은
-    저작 origin xyz 와 정확히 일치해야 하고, 회전은 XYZ(대문자, extrinsic) 규약과
-    일치해야 한다. 또한 이 rpy 에서는 XYZ 와 xyz(소문자) 결과가 실제로 달라
-    규약 선택이 유의미함을 함께 확인한다.
+    저작 origin xyz 와 정확히 일치해야 하고, 회전은 **intrinsic "xyz"(소문자)** 규약과
+    일치해야 한다. (대상 URDF 는 model_simplifier 가 scipy 기본 intrinsic 으로 rpy 를
+    저작했고, 구 상세 mesh 형상과 라운드트립 결과 xyz 만 일치한다 — extrinsic "XYZ" 로
+    읽으면 회전 박스가 돌출부처럼 오배치된다.) 이 rpy 에서 두 규약 결과가 실제로 달라
+    규약 선택이 유의미함도 함께 확인한다.
     """
     box = _get(loaded, "dda_collision")[5]
     expected_xyz = np.array([-0.0425, -0.0045, 0.109964])
-    expected_rot = R.from_euler("XYZ", [-1.5708, -1.5708, 0.0]).as_matrix()
-    wrong_rot = R.from_euler("xyz", [-1.5708, -1.5708, 0.0]).as_matrix()
+    expected_rot = R.from_euler("xyz", [-1.5708, -1.5708, 0.0]).as_matrix()
+    wrong_rot = R.from_euler("XYZ", [-1.5708, -1.5708, 0.0]).as_matrix()
 
     assert np.allclose(box["T"][:3, 3], expected_xyz, atol=1e-6)
     assert np.allclose(box["T"][:3, :3], expected_rot, atol=1e-9)

@@ -88,7 +88,8 @@ class EndEffectorPoseOptimizer:
 
         엔드이펙터 링크의 다중 `<collision>` 을 순회하여 box/cylinder/mesh 를 모두
         처리한다. 각 요소는 link_end 프레임 기준으로 저작 origin 변환이 적용된다.
-        rpy 는 URDF 표준 고정축 XYZ(scipy 대문자 "XYZ", extrinsic) 규약으로 해석한다.
+        rpy 는 scipy intrinsic "xyz"(소문자) 규약으로 해석한다(__origin_to_matrix 참조 —
+        URDF 표준 아님, model_simplifier 저작 규약과 일치).
 
         Args:
             file_path: URDF 파일 경로.
@@ -134,15 +135,18 @@ class EndEffectorPoseOptimizer:
     def __origin_to_matrix(origin) -> np.ndarray:
         """URDF `<origin>` 요소를 4×4 변환 행렬로 변환.
 
-        rpy 는 URDF 표준 고정축(extrinsic) XYZ = Rz(yaw)·Ry(pitch)·Rx(roll) 규약이다.
-        scipy 에서는 `R.from_euler("XYZ", rpy)` 대문자(extrinsic)가 이에 해당한다.
+        rpy 는 scipy **intrinsic** `R.from_euler("xyz", rpy)` (소문자) 규약으로 해석한다.
+        ⚠️ 주의: 이는 URDF 표준(고정축 extrinsic XYZ)이 아니다. 대상 엔드이펙터 URDF 는
+        자매 프로젝트 model_simplifier 가 scipy 기본값인 intrinsic "xyz" 로 rpy 를 저작했기
+        때문이다(구 상세 mesh 형상과 라운드트립 검증 결과 xyz 만 일치). 본 플러그인 내부
+        6-DOF 자세 표현도 동일하게 "xyz" 를 쓰므로 규약이 전체적으로 일관된다.
         origin 또는 그 xyz/rpy 가 없으면 항등원소로 취급한다.
         """
         T = np.eye(4)
         if origin is None:
             return T
         if getattr(origin, "rpy", None) is not None:
-            T[:3, :3] = R.from_euler("XYZ", origin.rpy).as_matrix()
+            T[:3, :3] = R.from_euler("xyz", origin.rpy).as_matrix()
         if getattr(origin, "xyz", None) is not None:
             T[:3, 3] = np.asarray(origin.xyz, dtype=float)
         return T
