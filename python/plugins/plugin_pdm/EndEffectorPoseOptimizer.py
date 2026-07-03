@@ -1109,92 +1109,114 @@ class EndEffectorPoseOptimizer:
         tcp_pose_T[:3, 3] = tcp_pose[:3]
         link_pose_T = tcp_pose_T @ tcp_to_link_pose_T  # world ← link_end
 
-        scan_points = np.asarray(self._scan_data.points)
-        if scan_points.shape[0] == 0:
+        # 브로드페이즈: 엔드이펙터 전체 AABB 로 스캔을 **한 번만** 크롭한다.
+        # 스캔 점군은 수백만 점 규모라, 프리미티브마다 전체 점군을 반복 크롭하면 느리다.
+        # o3d 의 C++ AABB 질의로 한 번 좁힌 부분점군(sub_pcd)에서만 해석적/샘플링 검사를
+        # 수행하는 것이 성능의 핵심이다. (프리미티브 우선 설계의 실제 이득이 여기서 나옴)
+        min_l, max_l = self.__ee_local_aabb(collision_elements)
+        corner_signs = np.array(
+            [[sx, sy, sz] for sx in (0.0, 1.0) for sy in (0.0, 1.0) for sz in (0.0, 1.0)]
+        )
+        corners_local = min_l + corner_signs * (max_l - min_l)
+        corners_world = (link_pose_T[:3, :3] @ corners_local.T).T + link_pose_T[:3, 3]
+        pad = max(collision_margin, crop_margin)
+        min_w = corners_world.min(axis=0) - pad
+        max_w = corners_world.max(axis=0) + pad
+        crop_box = o3d.geometry.AxisAlignedBoundingBox(min_w, max_w)  # type: ignore
+        idx = crop_box.get_point_indices_within_bounding_box(self._scan_data.points)
+        if not idx:
             return False
+        sub_pcd = self._scan_data.select_by_index(idx)
+        sub_points = np.asarray(sub_pcd.points)
 
         for element in collision_elements:
             kind = element["kind"]
             if kind == "box":
                 world_T = link_pose_T @ element["T"]  # world ← box
-                if self.__collision_box(scan_points, element["half"], world_T, collision_margin):
+                if self.__collision_box(sub_points, element["half"], world_T, collision_margin):
                     return True
             elif kind == "cylinder":
                 world_T = link_pose_T @ element["T"]  # world ← cylinder
                 if self.__collision_cylinder(
-                    scan_points, element["radius"], element["half_len"], world_T, collision_margin
+                    sub_points, element["radius"], element["half_len"], world_T, collision_margin
                 ):
                     return True
             elif kind == "mesh":
                 if self.__collision_mesh(
-                    element["mesh"], link_pose_T, collision_margin, crop_margin, sample_count
+                    element["mesh"], link_pose_T, collision_margin, sub_pcd, sample_count
                 ):
                     return True
         return False
 
     @staticmethod
-    def __crop_indices(points: np.ndarray, min_b: np.ndarray, max_b: np.ndarray) -> np.ndarray:
-        """AABB [min_b, max_b] 안에 드는 점들의 인덱스(불리언 마스크)."""
-        return np.all((points >= min_b) & (points <= max_b), axis=1)
+    def __ee_local_aabb(collision_elements: list[dict]) -> tuple[np.ndarray, np.ndarray]:
+        """모든 충돌 요소를 감싸는 link_end 프레임 AABB (min, max) 계산 (브로드페이즈용).
 
+        box/cylinder 는 회전 origin(T)을 반영한 8개 코너로 범위를 잡고, mesh 는 자신의
+        로컬 AABB 를 사용한다. 요소가 없으면 원점 축퇴 AABB 를 반환한다.
+        """
+        signs = np.array(
+            [[sx, sy, sz] for sx in (-1.0, 1.0) for sy in (-1.0, 1.0) for sz in (-1.0, 1.0)]
+        )
+        mins: list[np.ndarray] = []
+        maxs: list[np.ndarray] = []
+        for element in collision_elements:
+            kind = element["kind"]
+            if kind in ("box", "cylinder"):
+                if kind == "box":
+                    ext = element["half"]
+                else:
+                    ext = np.array([element["radius"], element["radius"], element["half_len"]])
+                T = element["T"]
+                corners = (T[:3, :3] @ (signs * ext).T).T + T[:3, 3]
+                mins.append(corners.min(axis=0))
+                maxs.append(corners.max(axis=0))
+            elif kind == "mesh":
+                aabb = element["mesh"].get_axis_aligned_bounding_box()
+                mins.append(np.asarray(aabb.min_bound))
+                maxs.append(np.asarray(aabb.max_bound))
+        if not mins:
+            return np.zeros(3), np.zeros(3)
+        return np.min(mins, axis=0), np.max(maxs, axis=0)
+
+    @staticmethod
     def __collision_box(
-        self,
-        scan_points: np.ndarray,
+        sub_points: np.ndarray,
         half: np.ndarray,
         world_T: np.ndarray,
         margin: float,
     ) -> bool:
-        """축정렬이 아닌 박스(world_T 로 배치)와 스캔 점군의 해석적 포함검사.
+        """브로드페이즈로 좁힌 부분점군과 박스의 해석적 포함검사.
 
-        박스의 world AABB 로 먼저 크롭한 뒤, 남은 점을 박스 로컬 프레임으로 역변환해
-        각 축 |좌표| ≤ half+margin 인 점이 있으면 충돌로 판정한다.
+        점을 박스 로컬 프레임으로 역변환(rot 정규직교 → 전치가 역행렬)해
+        각 축 |좌표| ≤ half+margin 인 점이 하나라도 있으면 충돌.
         """
+        if sub_points.shape[0] == 0:
+            return False
         rot = world_T[:3, :3]
         pos = world_T[:3, 3]
-
-        # world AABB 로 1차 크롭(속도) — 회전 박스의 8개 코너로 계산
-        signs = np.array(
-            [[sx, sy, sz] for sx in (-1.0, 1.0) for sy in (-1.0, 1.0) for sz in (-1.0, 1.0)]
-        )
-        corners_world = (rot @ (signs * half).T).T + pos
-        min_b = corners_world.min(axis=0) - margin
-        max_b = corners_world.max(axis=0) + margin
-        mask = self.__crop_indices(scan_points, min_b, max_b)
-        if not mask.any():
-            return False
-        pts = scan_points[mask]
-
-        # 박스 로컬 프레임으로 역변환 (rot 은 정규직교 → 전치가 역행렬)
-        local = (pts - pos) @ rot
+        local = (sub_points - pos) @ rot
         inside = np.all(np.abs(local) <= (half + margin), axis=1)
         return bool(inside.any())
 
+    @staticmethod
     def __collision_cylinder(
-        self,
-        scan_points: np.ndarray,
+        sub_points: np.ndarray,
         radius: float,
         half_len: float,
         world_T: np.ndarray,
         margin: float,
     ) -> bool:
-        """실린더(축=로컬 z, world_T 로 배치)와 스캔 점군의 해석적 포함검사.
+        """브로드페이즈로 좁힌 부분점군과 실린더(축=로컬 z)의 해석적 포함검사.
 
-        world AABB(보수적으로 반경 크기의 구로 근사)로 크롭 후, 로컬 프레임에서
-        |z| ≤ half_len+margin 이고 √(x²+y²) ≤ radius+margin 인 점이 있으면 충돌.
+        로컬 프레임에서 |z| ≤ half_len+margin 이고 √(x²+y²) ≤ radius+margin 인 점이
+        하나라도 있으면 충돌.
         """
+        if sub_points.shape[0] == 0:
+            return False
         rot = world_T[:3, :3]
         pos = world_T[:3, 3]
-
-        # 보수적 world AABB: 중심 ± (radius+half_len) 큐브 (회전 불변 상한)
-        reach = radius + half_len + margin
-        min_b = pos - reach
-        max_b = pos + reach
-        mask = self.__crop_indices(scan_points, min_b, max_b)
-        if not mask.any():
-            return False
-        pts = scan_points[mask]
-
-        local = (pts - pos) @ rot
+        local = (sub_points - pos) @ rot
         axial = np.abs(local[:, 2]) <= (half_len + margin)
         radial = np.hypot(local[:, 0], local[:, 1]) <= (radius + margin)
         return bool((axial & radial).any())
@@ -1204,28 +1226,19 @@ class EndEffectorPoseOptimizer:
         mesh_in_link: o3d.geometry.TriangleMesh,
         link_pose_T: np.ndarray,
         threshold: float,
-        crop_margin: float,
+        sub_pcd: "o3d.geometry.PointCloud",
         sample_count: int,
     ) -> bool:
-        """mesh 요소(link_end 프레임)와 스캔 점군의 표면 근접 충돌 검사(기존 방식).
+        """브로드페이즈로 좁힌 부분점군(sub_pcd)과 mesh 요소의 표면 근접 충돌 검사.
 
-        mesh 를 world 로 배치 → 그 AABB+crop_margin 으로 스캔 크롭 → mesh 표면 샘플과
-        스캔 점 간 최소거리 ≤ threshold 이면 충돌. slab mesh 및 기존 단일-mesh URDF 용.
+        mesh 를 world 로 배치 → 표면 균일 샘플과 sub_pcd 간 최소거리 ≤ threshold 이면
+        충돌. slab mesh 및 기존 단일-mesh URDF 용. (기존 단일-mesh URDF 는 sub_pcd 가
+        곧 mesh AABB 크롭과 동일하므로 동작이 보존된다.)
         """
+        if len(sub_pcd.points) == 0:
+            return False
         mesh_copy = copy.deepcopy(mesh_in_link)
         mesh_copy.transform(link_pose_T)  # type: ignore
-
-        aabb = mesh_copy.get_axis_aligned_bounding_box()
-        margin_vec = np.array([crop_margin, crop_margin, crop_margin])
-        min_b = aabb.min_bound - margin_vec
-        max_b = aabb.max_bound + margin_vec
-        crop_box = o3d.geometry.AxisAlignedBoundingBox(min_b, max_b)  # type: ignore
-
-        idx = crop_box.get_point_indices_within_bounding_box(self._scan_data.points)
-        if not idx:
-            return False
-        sub_pcd = self._scan_data.select_by_index(idx)
-
         mesh_pcd = mesh_copy.sample_points_uniformly(number_of_points=sample_count)
         distances = sub_pcd.compute_point_cloud_distance(mesh_pcd)
         return any(d <= threshold for d in distances)
