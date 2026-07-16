@@ -3,7 +3,7 @@ from open3d.cpu.pybind.geometry import PointCloud  # type: ignore
 import numpy as np
 from numpy.typing import NDArray
 from CylinderFitting import fit_cylinder
-from urdf_parser_py.urdf import URDF
+from urdf_parser_py.urdf import URDF, Box, Cylinder, Mesh
 from pathlib import Path
 from scipy.spatial.transform import Rotation as R
 import json
@@ -16,10 +16,14 @@ class EndEffectorPoseOptimizer:
     _scan_data: PointCloud
 
     # dda 정보
+    # __dda_collision: 충돌 검사용 프리미티브 요소 리스트 (box/cylinder 해석적 + mesh).
+    # __dda_mesh: 시각화(하위호환)용 병합 TriangleMesh — 모든 collision 요소를 하나로 합친 것.
+    __dda_collision: list[dict]
     __dda_mesh: o3d.geometry.TriangleMesh
     __dda_invers_transform_mat: np.ndarray
 
     # rt 정보
+    __rt_collision: list[dict]
     __rt_mesh: o3d.geometry.TriangleMesh
     __rt_invers_transform_mat: np.ndarray
 
@@ -50,7 +54,11 @@ class EndEffectorPoseOptimizer:
         self,
         file_path: str,
     ):
-        self.__dda_mesh, self.__dda_invers_transform_mat = self.__extract_tcp_and_end(
+        (
+            self.__dda_collision,
+            self.__dda_mesh,
+            self.__dda_invers_transform_mat,
+        ) = self.__extract_tcp_and_end(
             file_path,
             "dda_link_end",
             "dda_joint_tcp",
@@ -60,7 +68,11 @@ class EndEffectorPoseOptimizer:
         self,
         file_path: str,
     ):
-        self.__rt_mesh, self.__rt_invers_transform_mat = self.__extract_tcp_and_end(
+        (
+            self.__rt_collision,
+            self.__rt_mesh,
+            self.__rt_invers_transform_mat,
+        ) = self.__extract_tcp_and_end(
             file_path,
             "rt_link_end",
             "rt_joint_tcp",
@@ -71,48 +83,159 @@ class EndEffectorPoseOptimizer:
         file_path: str,
         end_link_name: str,
         tcp_joint_name: str,
-    ):
+    ) -> tuple[list[dict], o3d.geometry.TriangleMesh, np.ndarray]:
+        """URDF 엔드이펙터 링크에서 충돌 프리미티브 리스트·렌더 메시·TCP 역변환 추출.
+
+        엔드이펙터 링크의 다중 `<collision>` 을 순회하여 box/cylinder/mesh 를 모두
+        처리한다. 각 요소는 link_end 프레임 기준으로 저작 origin 변환이 적용된다.
+        rpy 는 scipy intrinsic "xyz"(소문자) 규약으로 해석한다(__origin_to_matrix 참조 —
+        URDF 표준 아님, model_simplifier 저작 규약과 일치).
+
+        Args:
+            file_path: URDF 파일 경로.
+            end_link_name: 엔드이펙터 링크 이름 (예: "dda_link_end").
+            tcp_joint_name: TCP 조인트 이름 (예: "dda_joint_tcp").
+
+        Returns:
+            tuple:
+                - collision_elements: 충돌 검사용 요소 리스트. 각 요소는 dict:
+                    box:      {"kind":"box", "half":ndarray(3), "T":ndarray(4,4)}
+                    cylinder: {"kind":"cylinder", "radius":float, "half_len":float, "T":ndarray(4,4)}
+                    mesh:     {"kind":"mesh", "mesh":TriangleMesh(link_end 프레임)}
+                  T 는 link_end ← primitive 변환(저작 origin).
+                - render_mesh: 모든 요소를 병합한 시각화용 TriangleMesh(link_end 프레임).
+                - tcp_to_origin_mat: TCP → link_end 변환(4×4). joint_tcp origin 의 역행렬.
+        """
         # urdf 파일 로드---------------------------------------------------------
-        urdf: URDF = URDF.from_xml_file(file_path)
+        # UTF-8 명시 로드: urdf_parser_py 의 from_xml_file 은 인코딩 없이 open() 하므로
+        # 로케일 기본값(예: Windows cp949)에서 비ASCII(한글 주석) URDF 가
+        # UnicodeDecodeError 로 실패한다. 파일을 UTF-8 로 직접 읽어 파서에 넘겨 회피.
+        xml_text = Path(file_path).read_text(encoding="utf-8")
+        urdf: URDF = URDF.from_xml_string(xml_text)
+        urdf_dir = Path(file_path).resolve().parent
 
-        # 엔드이펙터 형상 추출-----------------------------------------------------
-        # 형상 파일 경로
-        end_geometry_file_path = urdf.link_map[end_link_name].collision.geometry.filename
-        end_geometry_file_path = (Path(file_path) / Path(end_geometry_file_path.replace("file://", "../"))).resolve()
-        link_mesh = o3d.io.read_triangle_mesh(end_geometry_file_path)
+        # 엔드이펙터 collision 요소 추출 (다중 collision 순회) -----------------------
+        end_link = urdf.link_map[end_link_name]
+        collision_elements: list[dict] = []
+        for collision in end_link.collisions:
+            collision_elements.append(self.__build_collision_element(collision, urdf_dir))
 
-        # 형상 스케일
-        end_geomtry_scale = urdf.link_map[end_link_name].collision.geometry.scale
-        if isinstance(end_geomtry_scale, list):
-            end_geomtry_scale = float(end_geomtry_scale[0])
-        elif isinstance(end_geomtry_scale, (int, float)):
-            end_geomtry_scale = float(end_geomtry_scale)
-        else:
-            raise ValueError("엔드이펙터 형상 스케일 정보가 잘못되었습니다.")
-
-        link_mesh = link_mesh.scale(end_geomtry_scale, np.zeros(3, dtype=np.float64))  # type: ignore
-
-        # 자세 변환
-        end_pose_xyz = urdf.link_map[end_link_name].collision.origin.xyz
-        end_pose_rpy = urdf.link_map[end_link_name].collision.origin.rpy
-        T = np.eye(4)
-        T[:3, :3] = R.from_euler("xyz", end_pose_rpy).as_matrix()
-        T[:3, 3] = end_pose_xyz
-        link_mesh = link_mesh.transform(T)  # type: ignore
+        # 시각화(하위호환)용 병합 렌더 메시 생성 -------------------------------------
+        render_mesh = self.__build_render_mesh(collision_elements)
 
         # tcp와 엔드이펙터 형상 위치관계 정보 추출-----------------------------------
-        # end to tcp 정보 추출
-        end_to_tcp_relative_pose_xyz = urdf.joint_map[tcp_joint_name].origin.xyz
-        end_to_tcp_relative_pose_rpy = urdf.joint_map[tcp_joint_name].origin.rpy
-
-        # tcp to end 변환 행렬 계산
-        end_to_tcp_relative_pose_T = np.eye(4)
-        end_to_tcp_relative_pose_T[:3, :3] = R.from_euler("xyz", end_to_tcp_relative_pose_rpy).as_matrix()
-        end_to_tcp_relative_pose_T[:3, 3] = end_to_tcp_relative_pose_xyz
-        tcp_to_origin_mat = np.linalg.inv(end_to_tcp_relative_pose_T)
+        # joint_tcp origin = link_end ← tcp 변환. 역변환이 tcp → link_end.
+        tcp_joint_origin_T = self.__origin_to_matrix(urdf.joint_map[tcp_joint_name].origin)
+        tcp_to_origin_mat = np.linalg.inv(tcp_joint_origin_T)
 
         # ----------------------------------------------------------------------
-        return link_mesh, tcp_to_origin_mat
+        return collision_elements, render_mesh, tcp_to_origin_mat
+
+    @staticmethod
+    def __origin_to_matrix(origin) -> np.ndarray:
+        """URDF `<origin>` 요소를 4×4 변환 행렬로 변환.
+
+        rpy 는 scipy **intrinsic** `R.from_euler("xyz", rpy)` (소문자) 규약으로 해석한다.
+        ⚠️ 주의: 이는 URDF 표준(고정축 extrinsic XYZ)이 아니다. 대상 엔드이펙터 URDF 는
+        자매 프로젝트 model_simplifier 가 scipy 기본값인 intrinsic "xyz" 로 rpy 를 저작했기
+        때문이다(구 상세 mesh 형상과 라운드트립 검증 결과 xyz 만 일치). 본 플러그인 내부
+        6-DOF 자세 표현도 동일하게 "xyz" 를 쓰므로 규약이 전체적으로 일관된다.
+        origin 또는 그 xyz/rpy 가 없으면 항등원소로 취급한다.
+        """
+        T = np.eye(4)
+        if origin is None:
+            return T
+        if getattr(origin, "rpy", None) is not None:
+            T[:3, :3] = R.from_euler("xyz", origin.rpy).as_matrix()
+        if getattr(origin, "xyz", None) is not None:
+            T[:3, 3] = np.asarray(origin.xyz, dtype=float)
+        return T
+
+    def __build_collision_element(self, collision, urdf_dir: Path) -> dict:
+        """단일 URDF `<collision>` 을 충돌 요소 dict 로 변환.
+
+        box/cylinder 는 해석적 포함검사에 쓰이는 half-extent·반경/길이와 origin 변환(T)을
+        보관한다. mesh 는 origin 변환·scale 을 적용한 o3d TriangleMesh(link_end 프레임)를
+        보관한다.
+        """
+        geometry = collision.geometry
+        T = self.__origin_to_matrix(collision.origin)  # link_end ← primitive
+
+        if isinstance(geometry, Box):
+            half = np.asarray(geometry.size, dtype=float) / 2.0
+            return {"kind": "box", "half": half, "T": T}
+
+        if isinstance(geometry, Cylinder):
+            return {
+                "kind": "cylinder",
+                "radius": float(geometry.radius),
+                "half_len": float(geometry.length) / 2.0,
+                "T": T,
+            }
+
+        if isinstance(geometry, Mesh):
+            mesh = self.__load_mesh_geometry(geometry, urdf_dir)
+            mesh = mesh.transform(T)  # type: ignore  # origin 적용 → link_end 프레임
+            return {"kind": "mesh", "mesh": mesh}
+
+        raise ValueError(f"지원하지 않는 collision geometry 타입입니다: {type(geometry).__name__}")
+
+    @staticmethod
+    def __load_mesh_geometry(geometry, urdf_dir: Path) -> o3d.geometry.TriangleMesh:
+        """URDF Mesh geometry 를 scale 을 적용한 o3d TriangleMesh 로 로드.
+
+        경로는 URDF 표준 상대경로("../meshes/...")로 간주하고 URDF 디렉터리 기준으로
+        해석한다. `file://` 접두는 제거한다. scale 은 [sx,sy,sz] 리스트(등방 가정, 첫 값
+        사용) 또는 스칼라를 허용한다.
+        """
+        filename = geometry.filename
+        if filename.startswith("file://"):
+            filename = filename[len("file://"):]
+        mesh_path = (urdf_dir / filename).resolve()
+        mesh = o3d.io.read_triangle_mesh(str(mesh_path))
+
+        scale = geometry.scale
+        if scale is None:
+            scale_factor = 1.0
+        elif isinstance(scale, (list, tuple, np.ndarray)):
+            scale_factor = float(np.asarray(scale, dtype=float)[0])
+        elif isinstance(scale, (int, float)):
+            scale_factor = float(scale)
+        else:
+            raise ValueError("엔드이펙터 mesh scale 정보가 잘못되었습니다.")
+
+        return mesh.scale(scale_factor, np.zeros(3, dtype=np.float64))  # type: ignore
+
+    @staticmethod
+    def __build_render_mesh(collision_elements: list[dict]) -> o3d.geometry.TriangleMesh:
+        """충돌 요소 리스트를 시각화용 단일 TriangleMesh(link_end 프레임)로 병합.
+
+        box/cylinder 는 o3d 기본 형상으로 만들어 origin 변환을 적용하고, mesh 요소는
+        이미 link_end 프레임으로 변환된 메시를 그대로 합친다. 기존에 단일 메시를
+        기대하던 시각화 소비자(export_poses/viewer/notebook)의 하위호환을 위한 것이다.
+        """
+        merged = o3d.geometry.TriangleMesh()
+        for element in collision_elements:
+            kind = element["kind"]
+            if kind == "box":
+                half = element["half"]
+                size = 2.0 * half
+                # create_box 는 [0,size] 범위 → 중심 정렬 위해 -half 이동 후 origin 적용
+                box = o3d.geometry.TriangleMesh.create_box(
+                    float(size[0]), float(size[1]), float(size[2])
+                )
+                box = box.translate(-half)  # type: ignore
+                box = box.transform(element["T"])  # type: ignore
+                merged += box
+            elif kind == "cylinder":
+                cyl = o3d.geometry.TriangleMesh.create_cylinder(
+                    radius=element["radius"], height=2.0 * element["half_len"]
+                )
+                cyl = cyl.transform(element["T"])  # type: ignore
+                merged += cyl
+            elif kind == "mesh":
+                merged += element["mesh"]
+        return merged
 
     def calculate_DDA_pose_for_detecting_welding_point(
         self,
@@ -150,7 +273,7 @@ class EndEffectorPoseOptimizer:
         mask = []
         for i in range(len(dda_tcp_pose_candidates)):
             is_collision = self.__check_collision(
-                self.__dda_mesh,
+                self.__dda_collision,
                 dda_tcp_pose_candidates[i],
                 self.__dda_invers_transform_mat,
             )
@@ -390,7 +513,7 @@ class EndEffectorPoseOptimizer:
         valid_base_dda_poses = []
         for dda_pose in dda_base_candidates:
             is_collision = self.__check_collision(
-                self.__dda_mesh,
+                self.__dda_collision,
                 dda_pose,
                 self.__dda_invers_transform_mat,
             )
@@ -417,7 +540,7 @@ class EndEffectorPoseOptimizer:
 
             # 90도 회전된 DDA 자세의 충돌 검사
             is_rotated_dda_collision = self.__check_collision(
-                self.__dda_mesh,
+                self.__dda_collision,
                 rotated_dda_pose,
                 self.__dda_invers_transform_mat,
             )
@@ -521,7 +644,7 @@ class EndEffectorPoseOptimizer:
         # 각 인덱스별 슬롯 결과 (None = 무효, dict = 유효) ----------------------
         slot_results: list[dict | None] = []
         for dda_pose in dda_base_candidates:
-            if self.__check_collision(self.__dda_mesh, dda_pose, self.__dda_invers_transform_mat):
+            if self.__check_collision(self.__dda_collision, dda_pose, self.__dda_invers_transform_mat):
                 slot_results.append(None)
                 continue
             slot = self.__process_dda_rt_combination(dda_pose, angle_of_rt, distance_from_dda_to_rt)
@@ -643,7 +766,7 @@ class EndEffectorPoseOptimizer:
         # RT1 (+angle) 계산 및 충돌 검사
         rt1_pose = self.__calculate_rt_pose_for_angle(dda_pose, angle_of_rt, distance_from_dda_to_rt)
         is_rt1_collision = self.__check_collision(
-            self.__rt_mesh,
+            self.__rt_collision,
             rt1_pose,
             self.__rt_invers_transform_mat,
         )
@@ -654,7 +777,7 @@ class EndEffectorPoseOptimizer:
         # RT2 (-angle) 계산 및 충돌 검사
         rt2_pose = self.__calculate_rt_pose_for_angle(dda_pose, -angle_of_rt, distance_from_dda_to_rt)
         is_rt2_collision = self.__check_collision(
-            self.__rt_mesh,
+            self.__rt_collision,
             rt2_pose,
             self.__rt_invers_transform_mat,
         )
@@ -959,54 +1082,167 @@ class EndEffectorPoseOptimizer:
 
     def __check_collision(
         self,
-        link_model: o3d.geometry.TriangleMesh,
+        collision_elements: list[dict],
         tcp_pose: np.ndarray,
         tcp_to_link_pose_T: np.ndarray,
-        margin: float = 0.05,
+        collision_margin: float = 0.001,
+        crop_margin: float = 0.05,
         sample_count: int = 5000,
     ) -> bool:
-        """메쉬(변환된)와 로드된 스캔 점군 데이터 간 충돌 여부 검사.
+        """엔드이펙터 충돌 요소들과 로드된 스캔 점군 간 충돌 여부 검사.
+
+        box/cylinder 프리미티브는 스캔 점을 각 요소의 로컬 프레임으로 역변환해 해석적
+        포함검사(설계이념: 연산 최적화)를 수행하고, mesh 요소만 기존 표면 샘플링 방식으로
+        검사한다. 요소 중 하나라도 충돌하면 즉시 True 를 반환한다.
 
         Args:
-            link_model: 검사할 TriangleMesh.
+            collision_elements: 충돌 요소 dict 리스트(__extract_tcp_and_end 산출물).
             tcp_pose: TCP 자세 array(6) [x, y, z, roll, pitch, yaw] (라디안).
-            tcp_to_link_pose_T: TCP에서 링크로의 변환 행렬.
-            margin: 충돌 검사 마진. Defaults to 0.05.
-            sample_count: 메쉬 샘플링 점 수. Defaults to 5000.
+            tcp_to_link_pose_T: TCP → link_end 변환 행렬(4×4).
+            collision_margin: 충돌 판정 스킨/임계값 (m). box/cylinder 포함검사의 팽창량,
+                mesh 표면 근접 임계값 모두에 사용. Defaults to 0.001.
+            crop_margin: mesh 검사 시 스캔 크롭 바운딩박스 확장량 (m). Defaults to 0.05.
+            sample_count: mesh 표면 샘플링 점 수. Defaults to 5000.
 
         Returns:
             bool: 충돌 시 True.
         """
-        # 엔드이펙터를 검사 대상 위치로 이동-----------------------------------------
+        # 엔드이펙터(link_end) 프레임을 world 로 배치하는 변환 계산 -------------------
         tcp_pose_T = np.eye(4)
         tcp_pose_T[:3, :3] = R.from_euler("xyz", tcp_pose[3:]).as_matrix()
         tcp_pose_T[:3, 3] = tcp_pose[:3]
+        link_pose_T = tcp_pose_T @ tcp_to_link_pose_T  # world ← link_end
 
-        link_pose_T = tcp_pose_T @ tcp_to_link_pose_T
-
-        mesh_copy = copy.deepcopy(link_model)
-        mesh_copy.transform(link_pose_T)  # type: ignore
-
-        # 연산량을 줄이기 위해 스캔 데이터 필터링-------------------------------------
-        # 엔드이펙터의 바운딩 박스 계산
-        aabb = mesh_copy.get_axis_aligned_bounding_box()
-
-        # 바운딩 박스에 마진 추가
-        margin_vec = np.array([margin, margin, margin])
-        min_b = aabb.min_bound - margin_vec
-        max_b = aabb.max_bound + margin_vec
-        crop_box = o3d.geometry.AxisAlignedBoundingBox(min_b, max_b)  # type: ignore
-
-        # 바운딩 박스 내 점 추출
+        # 브로드페이즈: 엔드이펙터 전체 AABB 로 스캔을 **한 번만** 크롭한다.
+        # 스캔 점군은 수백만 점 규모라, 프리미티브마다 전체 점군을 반복 크롭하면 느리다.
+        # o3d 의 C++ AABB 질의로 한 번 좁힌 부분점군(sub_pcd)에서만 해석적/샘플링 검사를
+        # 수행하는 것이 성능의 핵심이다. (프리미티브 우선 설계의 실제 이득이 여기서 나옴)
+        min_l, max_l = self.__ee_local_aabb(collision_elements)
+        corner_signs = np.array(
+            [[sx, sy, sz] for sx in (0.0, 1.0) for sy in (0.0, 1.0) for sz in (0.0, 1.0)]
+        )
+        corners_local = min_l + corner_signs * (max_l - min_l)
+        corners_world = (link_pose_T[:3, :3] @ corners_local.T).T + link_pose_T[:3, 3]
+        pad = max(collision_margin, crop_margin)
+        min_w = corners_world.min(axis=0) - pad
+        max_w = corners_world.max(axis=0) + pad
+        crop_box = o3d.geometry.AxisAlignedBoundingBox(min_w, max_w)  # type: ignore
         idx = crop_box.get_point_indices_within_bounding_box(self._scan_data.points)
         if not idx:
             return False
         sub_pcd = self._scan_data.select_by_index(idx)
+        sub_points = np.asarray(sub_pcd.points)
 
-        # 엔드이펙터 표면 점 추출--------------------------------------------------
+        for element in collision_elements:
+            kind = element["kind"]
+            if kind == "box":
+                world_T = link_pose_T @ element["T"]  # world ← box
+                if self.__collision_box(sub_points, element["half"], world_T, collision_margin):
+                    return True
+            elif kind == "cylinder":
+                world_T = link_pose_T @ element["T"]  # world ← cylinder
+                if self.__collision_cylinder(
+                    sub_points, element["radius"], element["half_len"], world_T, collision_margin
+                ):
+                    return True
+            elif kind == "mesh":
+                if self.__collision_mesh(
+                    element["mesh"], link_pose_T, collision_margin, sub_pcd, sample_count
+                ):
+                    return True
+        return False
+
+    @staticmethod
+    def __ee_local_aabb(collision_elements: list[dict]) -> tuple[np.ndarray, np.ndarray]:
+        """모든 충돌 요소를 감싸는 link_end 프레임 AABB (min, max) 계산 (브로드페이즈용).
+
+        box/cylinder 는 회전 origin(T)을 반영한 8개 코너로 범위를 잡고, mesh 는 자신의
+        로컬 AABB 를 사용한다. 요소가 없으면 원점 축퇴 AABB 를 반환한다.
+        """
+        signs = np.array(
+            [[sx, sy, sz] for sx in (-1.0, 1.0) for sy in (-1.0, 1.0) for sz in (-1.0, 1.0)]
+        )
+        mins: list[np.ndarray] = []
+        maxs: list[np.ndarray] = []
+        for element in collision_elements:
+            kind = element["kind"]
+            if kind in ("box", "cylinder"):
+                if kind == "box":
+                    ext = element["half"]
+                else:
+                    ext = np.array([element["radius"], element["radius"], element["half_len"]])
+                T = element["T"]
+                corners = (T[:3, :3] @ (signs * ext).T).T + T[:3, 3]
+                mins.append(corners.min(axis=0))
+                maxs.append(corners.max(axis=0))
+            elif kind == "mesh":
+                aabb = element["mesh"].get_axis_aligned_bounding_box()
+                mins.append(np.asarray(aabb.min_bound))
+                maxs.append(np.asarray(aabb.max_bound))
+        if not mins:
+            return np.zeros(3), np.zeros(3)
+        return np.min(mins, axis=0), np.max(maxs, axis=0)
+
+    @staticmethod
+    def __collision_box(
+        sub_points: np.ndarray,
+        half: np.ndarray,
+        world_T: np.ndarray,
+        margin: float,
+    ) -> bool:
+        """브로드페이즈로 좁힌 부분점군과 박스의 해석적 포함검사.
+
+        점을 박스 로컬 프레임으로 역변환(rot 정규직교 → 전치가 역행렬)해
+        각 축 |좌표| ≤ half+margin 인 점이 하나라도 있으면 충돌.
+        """
+        if sub_points.shape[0] == 0:
+            return False
+        rot = world_T[:3, :3]
+        pos = world_T[:3, 3]
+        local = (sub_points - pos) @ rot
+        inside = np.all(np.abs(local) <= (half + margin), axis=1)
+        return bool(inside.any())
+
+    @staticmethod
+    def __collision_cylinder(
+        sub_points: np.ndarray,
+        radius: float,
+        half_len: float,
+        world_T: np.ndarray,
+        margin: float,
+    ) -> bool:
+        """브로드페이즈로 좁힌 부분점군과 실린더(축=로컬 z)의 해석적 포함검사.
+
+        로컬 프레임에서 |z| ≤ half_len+margin 이고 √(x²+y²) ≤ radius+margin 인 점이
+        하나라도 있으면 충돌.
+        """
+        if sub_points.shape[0] == 0:
+            return False
+        rot = world_T[:3, :3]
+        pos = world_T[:3, 3]
+        local = (sub_points - pos) @ rot
+        axial = np.abs(local[:, 2]) <= (half_len + margin)
+        radial = np.hypot(local[:, 0], local[:, 1]) <= (radius + margin)
+        return bool((axial & radial).any())
+
+    def __collision_mesh(
+        self,
+        mesh_in_link: o3d.geometry.TriangleMesh,
+        link_pose_T: np.ndarray,
+        threshold: float,
+        sub_pcd: "o3d.geometry.PointCloud",
+        sample_count: int,
+    ) -> bool:
+        """브로드페이즈로 좁힌 부분점군(sub_pcd)과 mesh 요소의 표면 근접 충돌 검사.
+
+        mesh 를 world 로 배치 → 표면 균일 샘플과 sub_pcd 간 최소거리 ≤ threshold 이면
+        충돌. slab mesh 및 기존 단일-mesh URDF 용. (기존 단일-mesh URDF 는 sub_pcd 가
+        곧 mesh AABB 크롭과 동일하므로 동작이 보존된다.)
+        """
+        if len(sub_pcd.points) == 0:
+            return False
+        mesh_copy = copy.deepcopy(mesh_in_link)
+        mesh_copy.transform(link_pose_T)  # type: ignore
         mesh_pcd = mesh_copy.sample_points_uniformly(number_of_points=sample_count)
-
-        # 점들간 거리 계산으로 충돌 여부 확인----------------------------------------
         distances = sub_pcd.compute_point_cloud_distance(mesh_pcd)
-        threshold = 0.001
         return any(d <= threshold for d in distances)

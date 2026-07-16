@@ -74,21 +74,48 @@ PCD + g_point ──► [A1] 배관 프로파일 추정 (방향, 중심, 반경)
 
 ---
 
-## A3. DDA 충돌 필터 — `__check_collision`
+## A3. DDA/RT 충돌 필터 — `__check_collision`
 
-**입력**: `link_model`(o3d.TriangleMesh), `tcp_pose`(6,), `tcp_to_link_pose_T`(4×4)
-**출력**: bool
+**입력**: `collision_elements`(충돌 요소 dict 리스트), `tcp_pose`(6,), `tcp_to_link_pose_T`(4×4),
+`collision_margin=0.001`, `crop_margin=0.05`, `sample_count=5000`
+**출력**: bool (요소 중 하나라도 충돌하면 True)
 
-### 단계
-1. **메쉬 변환**: `tcp_pose` 를 4×4 행렬로 만들고 `tcp_to_link_pose_T` 로 후처리해 mesh 를 world frame 으로 옮긴 사본 생성.
-2. **AABB 마진 ROI**: 변환된 메쉬의 AABB 에 `margin=0.05m` 더해 PCD 에서 점 추출 (성능 최적화). 비어 있으면 `False` 즉시 반환.
-3. **메쉬 표면 균일 샘플**: `sample_count=5000` 점.
-4. **거리 비교**: `compute_point_cloud_distance(sub_pcd, mesh_pcd)` 로 PCD ↔ 메쉬 표면 점들의 최소 거리. 어느 하나라도 `threshold = 0.001m` (1mm) 이하면 충돌로 판정.
+`collision_elements` 는 `__extract_tcp_and_end` 가 URDF 엔드이펙터 링크의 다중 `<collision>`
+을 순회해 만든 리스트다. 각 요소는 타입별 dict:
+
+| kind | 필드 | 검사 방식 |
+|------|------|-----------|
+| `box` | `half`(3,), `T`(4×4, link_end←box) | **해석적 point-in-box** |
+| `cylinder` | `radius`, `half_len`, `T` | **해석적 point-in-cylinder** (축=로컬 z) |
+| `mesh` | `mesh`(link_end 프레임 o3d) | 기존 표면 샘플링 방식 (slab·구형 URDF) |
+
+### 공통 전처리
+`link_pose_T = tcp_pose_T @ tcp_to_link_pose_T` (world ← link_end) 를 한 번 계산.
+
+### box/cylinder — 프리미티브 네이티브 (설계이념: 연산 최적화)
+1. `world_T = link_pose_T @ element["T"]` 로 프리미티브를 world 에 배치.
+2. 프리미티브 world AABB(box 는 8코너, cylinder 는 보수적 큐브)로 스캔을 1차 크롭.
+3. 남은 점을 프리미티브 **로컬 프레임으로 역변환**(정규직교 회전은 전치가 역행렬):
+   - box: 모든 축 `|좌표| ≤ half + margin` 이면 충돌.
+   - cylinder: `|z| ≤ half_len + margin` 이고 `√(x²+y²) ≤ radius + margin` 이면 충돌.
+
+메쉬 5000점 샘플링 없이 스캔 점의 포함 여부를 직접 판정하므로 빠르고, 회전 박스도
+정확히 처리한다(과거 단일-mesh 방식의 AABB 누락 위험 제거).
+
+### mesh — 기존 표면 샘플링 (slab, 기존 단일-mesh URDF 하위호환)
+1. mesh 사본을 `link_pose_T` 로 world 로 이동.
+2. 변환된 메쉬 AABB 에 `crop_margin=0.05m` 더해 PCD 크롭 (비면 `False`).
+3. 메쉬 표면 `sample_count=5000` 균일 샘플.
+4. `compute_point_cloud_distance` 최소거리 ≤ `collision_margin`(1mm) 이면 충돌.
 
 ### 주의
-- AABB 마진(0.05m) 이 작으면 회전한 메쉬가 박스 밖으로 약간 튀어나갔을 때 **충돌을 놓친다**. 메쉬 크기에 비해 충분히 잡혀 있는지 점검.
-- `sample_count` 는 정확도/성능 트레이드오프. 점군 밀도가 낮은 영역에서 메쉬 샘플링이 sparse 하면 거리 비교가 너무 관대해진다.
-- threshold(1mm) 변경 시 PR 본문에 사유 기록.
+- box/cylinder 는 프리미티브를 **꽉 찬 solid** 로 보고 스캔 점의 내부 포함을 판정한다.
+  URDF 박스가 실제 형상을 감싸는 bounding 형태라 다소 보수적(충돌 과검출 쪽)이며,
+  이는 충돌 필터로서 안전한 방향이다.
+- mesh 경로의 AABB 마진(0.05m) 이 작으면 회전 메쉬가 박스 밖으로 튀어나갔을 때 충돌을 놓친다.
+- `collision_margin`(1mm) 변경 시 PR 본문에 사유 기록.
+- `__dda_mesh`/`__rt_mesh` 는 위 요소들을 하나로 병합한 **시각화 전용** 렌더 메시로 별도 보관
+  (`export_poses`·viewer·데모 노트북 하위호환). 충돌 판정에는 쓰지 않는다.
 
 ---
 

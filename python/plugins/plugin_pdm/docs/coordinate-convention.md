@@ -96,16 +96,27 @@ T_world_link = T_world_tcp · T_tcp_link
 
 | URDF 요소 | 의미 |
 |-----------|------|
-| `<link name="dda_link_end">` | 엔드이펙터(=DDA) 메쉬가 붙는 마지막 링크 |
+| `<link name="dda_link_end">` | 엔드이펙터(=DDA) 형상이 붙는 마지막 링크. **다중 `<collision>`** 과 `<box>`/`<cylinder>`/`<mesh>` 를 모두 지원 |
 | `<joint name="dda_joint_tcp">` | `dda_link_end` ↔ TCP 프레임 사이의 고정 변환. `origin` 의 xyz/rpy 가 본 플러그인의 `tcp_to_link` 변환과 직결 |
 | `<mesh scale="0.001 0.001 0.001">` | mm → m 보정. 변경 금지 |
+| `<collision><origin rpy=...>` | 각 프리미티브/메쉬의 링크-로컬 배치. scipy **intrinsic `"xyz"`(소문자)** 로 해석 (URDF 표준 아님 — 아래 주의) |
+
+**rpy 규약 주의:**
+
+- **URDF `<origin rpy>` 파싱** (로더): 본 엔드이펙터 URDF 는 자매 프로젝트 model_simplifier 가
+  **scipy 기본 intrinsic `"xyz"`(소문자)** 로 rpy 를 저작했다. 따라서 로더도 **소문자** `R.from_euler("xyz", rpy)`
+  로 읽어야 형상이 맞는다. ⚠️ 이는 URDF 표준(고정축 extrinsic `XYZ`)이 **아니다**. 대문자 `"XYZ"` 로
+  읽으면 2축 이상 회전 박스가 **돌출부처럼 오배치**된다(구 상세 mesh 형상과의 라운드트립으로 확인). 
+  향후 URDF 를 다른 도구로 저작하면 이 규약을 반드시 재확인할 것.
+- **내부 6-DOF 자세 표현** `[x,y,z,roll,pitch,yaw]`: 동일하게 **소문자** `"xyz"` 를 자세↔행렬 양방향에
+  일관되게 쓴다. 결과적으로 로더와 내부 자세가 같은 규약이라 전체가 일관된다.
 
 이름 규약은 URDF 에 하드코딩되어 있다(`dda_link_end`, `dda_joint_tcp`, `rt_link_end`, `rt_joint_tcp`). URDF 를 새로 받으면 이 이름들을 유지하거나, `EndEffectorPoseOptimizer.load_DDA_from_urdf` / `load_RT_from_urdf` 호출 측에서 인자로 노출하도록 고쳐야 한다.
 
 ## 7. 흔한 실수 체크리스트
 
 - [ ] PCD 단위가 mm 인데 `scale=1.0` 으로 로드 → 모든 거리·반경이 1000배 어긋남
-- [ ] RPY 를 도(°) 로 그대로 `from_euler("xyz", rpy)` 에 넣음 → 라디안 인자라 실제로는 57배 큰 회전
-- [ ] `from_euler("XYZ", ...)` (대문자) — extrinsic 으로 처리되어 결과가 다름
+- [ ] RPY 를 도(°) 로 그대로 `from_euler` 에 넣음 → 라디안 인자라 실제로는 57배 큰 회전
+- [ ] 이 엔드이펙터 URDF 의 `<origin rpy>` 를 URDF 표준 대문자 `"XYZ"`(extrinsic) 로 해석 → 회전 프리미티브가 돌출부로 오배치. **이 URDF 는 model_simplifier 가 intrinsic `"xyz"` 로 저작했으므로 로더도 소문자 `"xyz"` 사용** (표준과 다름에 유의)
 - [ ] 4×4 변환을 좌·우 곱 뒤바꿔 적용
 - [ ] 배관 축이 거의 X축에 평행해서 `__calculate_dda_pose_candidate` 의 `basis` 분기가 발동되지 않으면 v1, v2 가 NaN — `dot > 0.9` 임계 검토

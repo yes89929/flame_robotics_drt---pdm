@@ -237,7 +237,9 @@ pose_groups_json, pose_groups = opt.calculate_DDA_RT_pose_for_taking_xray(
 > pip install -r python/plugins/plugin_pdm/requirements.txt
 > ```
 
-URDF 메쉬 경로는 `file://meshes/...` 상대 표기를 사용한다 — `EndEffectorPoseOptimizer.__extract_tcp_and_end` 가 URDF 파일 경로 기준으로 `../` 로 변환해 해석한다. 따라서 **URDF 파일은 `data/robot_models v1.5/robots/`** 처럼 메쉬 디렉토리(`../meshes/...`) 를 한 단계 위에서 찾을 수 있는 위치에 두어야 한다.
+URDF 메쉬 경로는 `../meshes/...` 표준 상대 표기(선택적 `file://` 접두 허용)를 사용한다 — `EndEffectorPoseOptimizer.__extract_tcp_and_end` 가 **URDF 파일이 있는 디렉터리** 기준으로 `(Path(urdf).parent / filename).resolve()` 해석한다(`file://` 접두는 제거). 따라서 **URDF 파일은 `data/robot_models v1.5/robots/`** 처럼 메쉬 디렉토리(`../meshes/...`) 를 한 단계 위에서 찾을 수 있는 위치에 두어야 한다.
+
+엔드이펙터 링크는 **다중 `<collision>`** 과 **프리미티브(`<box>`/`<cylinder>`) 우선** 형상을 지원한다. 로더는 링크의 모든 `<collision>` 을 순회해 box/cylinder 는 해석적 충돌검사용 요소로, `<mesh>` 는 기존 표면-샘플링용 요소로 보관한다(slab 등). `<origin rpy=...>` 는 scipy **intrinsic `"xyz"`(소문자)** 규약으로 해석한다 — ⚠️ 이는 URDF 표준(고정축 extrinsic XYZ)이 **아니다**. 대상 엔드이펙터 URDF 를 저작한 model_simplifier 가 scipy 기본 intrinsic 으로 rpy 를 기록했기 때문이며(구 상세 mesh 형상과 라운드트립 결과 `xyz` 만 일치, `XYZ` 로 읽으면 회전 박스가 돌출부로 오배치됨), 본 플러그인 내부 6-DOF 자세 규약과도 일치한다. 자세한 저장형태·충돌 알고리즘은 [docs/algorithm.md](docs/algorithm.md) A3 참조.
 
 ---
 
