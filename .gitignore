@@ -187,3 +187,6 @@ python/plugins/plugin_pdm/한화오션 지정 포인트 실험 결과/
 
 # tools/viewer GUI 시각 검증 캡쳐 산출물 (PrintWindow / pytest-qt 결과)
 python/plugins/plugin_pdm/tests/visual/_artifacts/
+
+# tools/export_poses.py 자세계산 산출물 (JSON/PNG, 로컬 생성물)
+python/plugins/plugin_pdm/output/
