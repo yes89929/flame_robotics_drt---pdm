@@ -34,7 +34,7 @@ from EndEffectorPoseOptimizer import EndEffectorPoseOptimizer  # noqa: WPS433
 _MANGLE = "_EndEffectorPoseOptimizer__"
 
 PLUGIN_PDM_ROOT = Path(__file__).resolve().parents[2]
-ROBOTS_DIR = PLUGIN_PDM_ROOT / "data" / "robot_models v1.5" / "robots"
+from data_paths import ROBOTS_DIR  # noqa: E402
 DDA_URDF = ROBOTS_DIR / "dda_endeffector.urdf"
 RT_URDF = ROBOTS_DIR / "rt_endeffector.urdf"
 OLD_DDA_URDF = ROBOTS_DIR / "rb10_1300e_DDA.urdf"
@@ -137,6 +137,8 @@ def test_loads_under_non_utf8_locale():
         f"""
         import sys
         sys.path.insert(0, {plugin_root!r})
+        from tools.viewer import _open3d_compat
+        _open3d_compat.apply()  # 한글 경로(구글 드라이브) STL 로드 — conftest 와 동일
         from EndEffectorPoseOptimizer import EndEffectorPoseOptimizer
         opt = EndEffectorPoseOptimizer()
         opt.load_DDA_from_urdf({str(DDA_URDF)!r})

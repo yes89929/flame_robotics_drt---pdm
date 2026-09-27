@@ -75,11 +75,7 @@ plugin_pdm/
 ├── CylinderFitting.py               ← 실린더 피팅(Eberly 방법)
 ├── JupyterVisualizer.py             ← 노트북에서 결과를 PyVista로 가시화
 ├── requirements.txt                 ← 추가 파이썬 의존성
-│
-├── data/
-│   └── robot_models v1.5/           ← 플러그인 단독 실험용 URDF/메쉬 사본
-│       ├── robots/                  ← rb10_1300e{,_DDA,_RT}.urdf
-│       └── meshes/                  ← link0~6, link_dda, link_rt
+├── data_paths.py                    ← 입력 데이터 경로(구글 드라이브) 상수
 │
 ├── STL2PLY/                         ← STL → PLY/PCD 변환 유틸 (오프라인 데이터 준비)
 │   ├── STL2PCD.py                   ← Open3D 균일/포아송 샘플링 기반 (권장)
@@ -91,6 +87,18 @@ plugin_pdm/
 ├── 한화오션 지정 포인트 실험 결과/           ← 실험 결과 이미지 (성공/실패 케이스)
 └── temp/                            ← 일시적 디버그 스크립트(`debug_*.py`, `test_*.py`)
 ```
+
+### 입력 데이터 (구글 드라이브)
+
+배관 점군·검사 지점·로봇 모델은 git 이 아니라 과제 구글 드라이브에 두고, 코드는 [data_paths.py](data_paths.py) 를 통해 **드라이브 경로를 직접 참조**한다. 기준 폴더는 `G:\내 드라이브\3. 진행 과제\P2413；DRT\3. 기타자료` 이며, 드라이브가 다른 위치에 마운트된 단말은 환경변수 `PDM_DATA_ROOT` 로 이 폴더를 지정한다.
+
+| 상수 | 기준 폴더 아래 위치 | 내용 |
+|------|------|------|
+| `PIPE_DATA_DIR` | `배관 데이터/한화오션 3종 cad to ply/` | `PIPE NO.{1,2,3}_fill.ply`(점군) · `_fill_testpoint.csv`(검사 지점) · `.stl`/`.stp`(원본 CAD) |
+| `ROBOTS_DIR` | `로봇 모델/robot_models v1.5/robots/` | `dda_endeffector.urdf`·`rt_endeffector.urdf`(프리미티브) · `rb10_1300e{,_DDA,_RT}.urdf` |
+| (메쉬) | `로봇 모델/robot_models v1.5/meshes/` | link0~6, link_dda, link_rt, RT slab |
+
+> 경로에 한글이 있어 Open3D 가 STL 을 직접 읽지 못한다. 드라이브 URDF 를 로드하기 전에 `tools.viewer._open3d_compat.apply()` 를 호출한다(데모 노트북 첫 셀·`tools/`·`tests/conftest.py` 에 적용됨).
 
 > 데모 노트북과 실험 결과 폴더의 한글 파일명은 **그대로 유지**할 것 (현장 보고서/이력 추적 목적). PyCharm/VSCode/Git 환경에서 한글 파일명이 깨지지 않도록 주의한다.
 
@@ -237,7 +245,7 @@ pose_groups_json, pose_groups = opt.calculate_DDA_RT_pose_for_taking_xray(
 > pip install -r python/plugins/plugin_pdm/requirements.txt
 > ```
 
-URDF 메쉬 경로는 `../meshes/...` 표준 상대 표기(선택적 `file://` 접두 허용)를 사용한다 — `EndEffectorPoseOptimizer.__extract_tcp_and_end` 가 **URDF 파일이 있는 디렉터리** 기준으로 `(Path(urdf).parent / filename).resolve()` 해석한다(`file://` 접두는 제거). 따라서 **URDF 파일은 `data/robot_models v1.5/robots/`** 처럼 메쉬 디렉토리(`../meshes/...`) 를 한 단계 위에서 찾을 수 있는 위치에 두어야 한다.
+URDF 메쉬 경로는 `../meshes/...` 표준 상대 표기(선택적 `file://` 접두 허용)를 사용한다 — `EndEffectorPoseOptimizer.__extract_tcp_and_end` 가 **URDF 파일이 있는 디렉터리** 기준으로 `(Path(urdf).parent / filename).resolve()` 해석한다(`file://` 접두는 제거). 따라서 **URDF 파일은 `robot_models v1.5/robots/`** 처럼 메쉬 디렉토리(`../meshes/...`) 를 한 단계 위에서 찾을 수 있는 위치에 두어야 한다.
 
 엔드이펙터 링크는 **다중 `<collision>`** 과 **프리미티브(`<box>`/`<cylinder>`) 우선** 형상을 지원한다. 로더는 링크의 모든 `<collision>` 을 순회해 box/cylinder 는 해석적 충돌검사용 요소로, `<mesh>` 는 기존 표면-샘플링용 요소로 보관한다(slab 등). `<origin rpy=...>` 는 scipy **intrinsic `"xyz"`(소문자)** 규약으로 해석한다 — ⚠️ 이는 URDF 표준(고정축 extrinsic XYZ)이 **아니다**. 대상 엔드이펙터 URDF 를 저작한 model_simplifier 가 scipy 기본 intrinsic 으로 rpy 를 기록했기 때문이며(구 상세 mesh 형상과 라운드트립 결과 `xyz` 만 일치, `XYZ` 로 읽으면 회전 박스가 돌출부로 오배치됨), 본 플러그인 내부 6-DOF 자세 규약과도 일치한다. 자세한 저장형태·충돌 알고리즘은 [docs/algorithm.md](docs/algorithm.md) A3 참조.
 

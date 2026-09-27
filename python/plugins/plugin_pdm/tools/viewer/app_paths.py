@@ -1,16 +1,12 @@
 """tools/viewer 가 사용하는 경로 상수.
 
-plugin_pdm 디렉토리 위치를 절대경로로 한 번만 계산해 두고, data 디렉토리
-및 robot URDF 경로를 함수로 노출한다.
+데이터 위치는 plugin_pdm 루트의 ``data_paths`` (구글 드라이브) 를 따르고,
+robot URDF 경로를 함수로 노출한다. plugin_pdm 루트가 sys.path 에 있어야 한다.
 """
 
 from pathlib import Path
 
-# tools/viewer/app_paths.py → parents[2] == plugin_pdm 디렉토리
-PLUGIN_ROOT: Path = Path(__file__).resolve().parents[2]
-
-DATA_DIR: Path = PLUGIN_ROOT / "data"
-ROBOT_MODELS_DIR: Path = DATA_DIR / "robot_models v1.5"
+from data_paths import PIPE_DATA_DIR as DATA_DIR, ROBOT_MODELS_DIR
 
 
 def dda_urdf_path() -> Path:

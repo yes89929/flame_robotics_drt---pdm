@@ -20,7 +20,6 @@
 from __future__ import annotations
 
 import warnings
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -392,9 +391,7 @@ def test_input_validation_rejects_bad_target_point(monkeypatch, mock_optimizer):
 # ============================================================================
 
 
-PLUGIN_PDM_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = PLUGIN_PDM_ROOT / "data"
-ROBOT_MODELS_DIR = DATA_DIR / "robot_models v1.5" / "robots"
+from data_paths import PIPE_DATA_DIR as DATA_DIR, ROBOTS_DIR as ROBOT_MODELS_DIR  # noqa: E402
 SCAN_FILE = DATA_DIR / "PIPE NO.3_fill.ply"
 TESTPOINT_FILE = DATA_DIR / "PIPE NO.3_fill_testpoint.csv"
 DDA_URDF = ROBOT_MODELS_DIR / "rb10_1300e_DDA.urdf"

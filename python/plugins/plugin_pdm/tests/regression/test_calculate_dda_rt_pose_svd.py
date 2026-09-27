@@ -13,20 +13,16 @@
     효과가 유지되는지 PIPE NO.3 데이터에서 검증한다.
 
 데이터 의존:
-    필요한 파일이 없으면 자동 skip — ``data/`` 디렉토리는 .gitignore 되어
-    개발자 단말에서 별도 관리한다.
+    필요한 파일이 없으면 자동 skip — 데이터는 git 이 아니라 구글 드라이브에서
+    관리한다(``data_paths.py``).
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
-PLUGIN_PDM_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = PLUGIN_PDM_ROOT / "data"
-ROBOT_MODELS_DIR = DATA_DIR / "robot_models v1.5" / "robots"
+from data_paths import PIPE_DATA_DIR as DATA_DIR, ROBOTS_DIR as ROBOT_MODELS_DIR  # noqa: E402
 
 PIPE_NAME = "PIPE NO.3_fill"
 SCAN_FILE = DATA_DIR / f"{PIPE_NAME}.ply"

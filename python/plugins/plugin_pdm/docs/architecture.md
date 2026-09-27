@@ -59,7 +59,7 @@ def on_btn_find_pose(self):
 |------|------|------|
 | 스캔 점군(PCD/PLY) | `(N, 3)` numpy + 법선 | 3D 스캐너 또는 시뮬레이션 STL 변환(`STL2PLY/`) |
 | 검사 포인트 `g_point` | `(3,)` world frame | 사용자 클릭(`JupyterVisualizer.visualize_selectable_pointcloud`) 또는 한화오션 지정 좌표 리스트 |
-| DDA URDF | `rb10_1300e_DDA.urdf` | `data/robot_models v1.5/robots/` 또는 메인 워크스페이스 `urdf/` |
+| DDA URDF | `rb10_1300e_DDA.urdf` | 구글 드라이브 `robot_models v1.5/robots/` (`data_paths.ROBOTS_DIR`) 또는 메인 워크스페이스 `urdf/` |
 | RT URDF | `rb10_1300e_RT.urdf` | 동일 |
 | 파라미터 | `num_candidates`, `distance_from_dda_to_surface`, `distance_from_dda_to_rt`, `angle_of_rt` | 호출자(노트북/매니저 GUI) |
 

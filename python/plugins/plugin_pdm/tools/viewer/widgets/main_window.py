@@ -112,7 +112,7 @@ class MainWindow(QMainWindow):
             # 초기 PIPE 자동 로드
             QTimer.singleShot(0, lambda: self._on_pipe_combo_changed(0))
         else:
-            self.statusBar().showMessage("data/ 디렉토리에서 *_fill.ply + *_testpoint.csv 페어를 찾지 못했습니다.")
+            self.statusBar().showMessage(f"{app_paths.DATA_DIR} 에서 *_fill.ply + *_testpoint.csv 페어를 찾지 못했습니다.")
             self._side_panel.set_optimize_enabled(False)
 
     # ----- UI 구성 ----------------------------------------------------------

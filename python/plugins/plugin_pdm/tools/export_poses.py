@@ -46,8 +46,7 @@ import open3d as o3d  # noqa: E402
 from EndEffectorPoseOptimizer import EndEffectorPoseOptimizer  # noqa: E402
 import JupyterVisualizer as JV  # noqa: E402
 
-DATA_DIR = PLUGIN_ROOT / "data"
-ROBOT_DIR = DATA_DIR / "robot_models v1.5" / "robots"
+from data_paths import PIPE_DATA_DIR, ROBOTS_DIR as ROBOT_DIR  # noqa: E402
 
 # 엔드이펙터 모델 세트: rb10(기존 단일-mesh) / primitive(신규 box·cylinder + slab)
 ENDEFFECTOR_URDFS = {
@@ -209,8 +208,8 @@ def classify(pose_groups) -> tuple[str, str]:
 
 def process_pipe(pipe_name: str, out_root: Path, limit: int | None, render: bool,
                  dda_urdf: Path, rt_urdf: Path):
-    ply = DATA_DIR / f"{pipe_name}.ply"
-    csv = DATA_DIR / f"{pipe_name}_testpoint.csv"
+    ply = PIPE_DATA_DIR / f"{pipe_name}.ply"
+    csv = PIPE_DATA_DIR / f"{pipe_name}_testpoint.csv"
     out_dir = out_root / pipe_name.replace("_fill", "")
     out_dir.mkdir(parents=True, exist_ok=True)
 
