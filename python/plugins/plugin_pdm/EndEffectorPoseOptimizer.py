@@ -37,6 +37,19 @@ class EndEffectorPoseOptimizer:
     __is_debug_mode: bool
     debuging_info: dict[str, Any]
 
+    # 마지막 3쌍 계산의 후보별 판정 (진단·시각화용). 각 항목:
+    # {"deg": 후보 각도(°), "DDA": [x,y,z,r,p,y], "status": "ok"|"dda_collision"|"rt_collision"}
+    last_candidates: list[dict]
+
+    @property
+    def pipe_profile(self) -> dict[str, Any]:
+        """마지막 `calculate_pipe_profile` 결과 (축 방향 단위벡터·축 위 한 점·반지름, m)."""
+        return {
+            "direction": np.asarray(self.__pipe_direction, dtype=float).tolist(),
+            "center": np.asarray(self.__pipe_center, dtype=float).tolist(),
+            "radius": float(self.__pipe_radius),
+        }
+
     def __init__(self, debug_mode: bool = False):
         self.__is_debug_mode = debug_mode
 
@@ -737,12 +750,17 @@ class EndEffectorPoseOptimizer:
 
         # 각 인덱스별 슬롯 결과 (None = 무효, dict = 유효) ----------------------
         slot_results: list[dict | None] = []
-        for dda_pose in dda_base_candidates:
+        self.last_candidates = []
+        for idx, dda_pose in enumerate(dda_base_candidates):
             if self.__check_collision(self.__dda_collision, dda_pose, self.__dda_invers_transform_mat):
                 slot_results.append(None)
+                self.last_candidates.append({"deg": idx * step_deg, "DDA": dda_pose.tolist(), "status": "dda_collision"})
                 continue
             slot = self.__process_dda_rt_combination(dda_pose, angle_of_rt, distance_from_dda_to_rt)
             slot_results.append(slot)  # __process_dda_rt_combination이 None 반환 가능
+            self.last_candidates.append(
+                {"deg": idx * step_deg, "DDA": dda_pose.tolist(), "status": "ok" if slot else "rt_collision"}
+            )
 
         # enumerate 순서가 곧 정렬 순서이므로 i < j < k가 자연 보장.
         valid_indices = sorted(i for i, s in enumerate(slot_results) if s is not None)
