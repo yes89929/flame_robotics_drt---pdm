@@ -62,6 +62,20 @@ export function buildTree(model: UrdfModel): TreeNode[] {
   return model.roots.map((r) => make(r, null))
 }
 
+/** 두 링크를 잇는 트리 경로 위의 가동 조인트 이름 (mimic 포함). 비어 있으면 상대 변환이 조인트 값과 무관하다. */
+export function movableJointsBetween(model: UrdfModel, a: string, b: string): string[] {
+  const parentJoint = new Map(model.joints.map((j) => [j.child, j]))
+  const chain = (link: string) => {
+    const out: UrdfJoint[] = []
+    for (let j = parentJoint.get(link); j; j = parentJoint.get(j.parent)) out.push(j)
+    return out
+  }
+  const ca = chain(a)
+  const cb = chain(b)
+  const shared = new Set(ca.filter((j) => cb.includes(j)).map((j) => j.name))
+  return [...ca, ...cb].filter((j) => !shared.has(j.name) && MOVABLE.has(j.type)).map((j) => j.name)
+}
+
 /** TCP 프레임으로 보이는 링크: 이름에 tcp 가 들어가고 형상이 없는 링크 */
 export function isTcpLink(model: UrdfModel, name: string): boolean {
   const l = model.links.find((x) => x.name === name)

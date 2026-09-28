@@ -2,7 +2,7 @@
 import { useMemo } from 'react'
 import { Matrix4 } from 'three'
 import { useStore, type Designation } from '../store'
-import { decompose, isTcpLink, linkWorld } from '../lib/urdf'
+import { decompose, isTcpLink, linkWorld, movableJointsBetween } from '../lib/urdf'
 
 const DEG = 180 / Math.PI
 const fmtPose = (m: Matrix4) => {
@@ -71,9 +71,10 @@ export function DesignationPanel() {
     if (!we || !wt) return null
     return fmtPose(we.clone().invert().multiply(wt))
   }
+  const between = (end: string, tcp: string) => (end && tcp ? movableJointsBetween(urdf, end, tcp) : [])
   const rel = [
-    { name: 'DDA', r: relation(designation.ddaEnd, designation.ddaTcp) },
-    { name: 'RT', r: relation(designation.rtEnd, designation.rtTcp) },
+    { name: 'DDA', r: relation(designation.ddaEnd, designation.ddaTcp), moving: between(designation.ddaEnd, designation.ddaTcp) },
+    { name: 'RT', r: relation(designation.rtEnd, designation.rtTcp), moving: between(designation.rtEnd, designation.rtTcp) },
   ]
 
   return (
@@ -116,6 +117,14 @@ export function DesignationPanel() {
           ))}
         </tbody>
       </table>
+      {rel
+        .filter((x) => x.moving.length > 0)
+        .map((x) => (
+          <div key={x.name} className="error small-text" title={x.moving.join(', ')}>
+            ⚠ {x.name}: 엔드이펙터와 TCP 사이에 가동 조인트 {x.moving.length}개 — 움직이면 위 관계가 바뀝니다. TCP를 저작한
+            기준 자세(보통 모두 0)에서 PDM을 실행하세요.
+          </div>
+        ))}
       <div className="muted small-text">위 상대 변환은 현재 조인트 값 기준이며, PDM 실행에도 현재 조인트 값이 그대로 쓰입니다.</div>
     </div>
   )
