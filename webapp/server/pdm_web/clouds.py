@@ -20,6 +20,67 @@ import open3d as o3d
 MM_GUESS_EXTENT = 100.0
 
 
+_PCD_TYPES = {("F", 4): "<f4", ("F", 8): "<f8", ("U", 1): "u1", ("U", 2): "<u2", ("U", 4): "<u4",
+              ("I", 1): "i1", ("I", 2): "<i2", ("I", 4): "<i4"}
+
+
+def read_pcd(path: Path) -> o3d.geometry.PointCloud:
+    """PCD(ascii·binary)를 직접 읽는다.
+
+    Open3D 는 현장 스캔 PCD(2026-09-15 보정본 등)를 0점으로 읽는다 — 첫 줄이 VERSION 이 아닌
+    주석이고 rgb 가 U(uint32)형이라서다. 필드는 x y z 필수, rgb/rgba·normal_x..z(또는 nx..nz) 선택.
+    binary_compressed 는 지원하지 않으므로 Open3D 로 넘긴다.
+    """
+    header: dict[str, list[str]] = {}
+    with path.open("rb") as f:
+        while True:
+            line = f.readline()
+            if not line:
+                raise ValueError("PCD 헤더가 끝나지 않았습니다")
+            text = line.decode("ascii", "replace").strip()
+            if not text or text.startswith("#"):
+                continue
+            key, *vals = text.split()
+            header[key.upper()] = vals
+            if key.upper() == "DATA":
+                break
+        data_kind = header["DATA"][0].lower()
+        if data_kind not in ("ascii", "binary"):
+            return o3d.io.read_point_cloud(str(path))
+        names = header["FIELDS"]
+        counts = [int(c) for c in header.get("COUNT", ["1"] * len(names))]
+        dtype = np.dtype([
+            (n, _PCD_TYPES[(t, int(s))], (c,)) if c > 1 else (n, _PCD_TYPES[(t, int(s))])
+            for n, t, s, c in zip(names, header["TYPE"], header["SIZE"], counts)
+        ])
+        n_pts = int(header.get("POINTS", [0])[0])
+        if data_kind == "binary":
+            rec = np.frombuffer(f.read(dtype.itemsize * n_pts), dtype=dtype, count=n_pts)
+        else:
+            rec = np.loadtxt(f, dtype=dtype, max_rows=n_pts, ndmin=1)
+
+    xyz = np.stack([rec["x"], rec["y"], rec["z"]], axis=1).astype(np.float64)
+    ok = np.isfinite(xyz).all(axis=1)
+    pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(xyz[ok]))
+    color_field = next((c for c in ("rgb", "rgba") if c in names), None)
+    if color_field:
+        packed = np.ascontiguousarray(rec[color_field]).view(np.uint32)[ok]
+        rgb = np.stack([(packed >> 16) & 255, (packed >> 8) & 255, packed & 255], axis=1) / 255.0
+        pcd.colors = o3d.utility.Vector3dVector(rgb)
+    for nx, ny, nz in (("normal_x", "normal_y", "normal_z"), ("nx", "ny", "nz")):
+        if nx in names:
+            nrm = np.stack([rec[nx], rec[ny], rec[nz]], axis=1).astype(np.float64)[ok]
+            pcd.normals = o3d.utility.Vector3dVector(nrm)
+            break
+    return pcd
+
+
+def read_cloud(path: Path) -> o3d.geometry.PointCloud:
+    if path.suffix.lower() == ".pcd":
+        return read_pcd(path)
+    return o3d.io.read_point_cloud(str(path))
+
+
 @dataclass
 class Cloud:
     id: str
@@ -83,7 +144,7 @@ class CloudStore:
             if cloud_id in self._clouds:
                 return self._clouds[cloud_id]
 
-        pcd = o3d.io.read_point_cloud(str(path))
+        pcd = read_cloud(path)
         pts = np.asarray(pcd.points)
         if len(pts) == 0:
             raise ValueError(f"점이 없는 파일이거나 읽을 수 없는 형식입니다: {path.name}")

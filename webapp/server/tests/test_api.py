@@ -74,6 +74,29 @@ def test_cloud_load_guesses_mm_and_serves_binary(tmp_path):
     assert client.get("/api/cloud/nope/positions").status_code == 404
 
 
+def test_read_pcd_with_comment_and_uint_rgb(tmp_path):
+    """현장 스캔 PCD 형식: 첫 줄 주석, rgb 가 U(uint32), normal_x..z — Open3D 는 0점으로 읽는다."""
+    from pdm_web.clouds import read_pcd
+
+    rec = np.zeros(2, dtype=[("x", "<f4"), ("y", "<f4"), ("z", "<f4"), ("rgb", "<u4"),
+                             ("normal_x", "<f4"), ("normal_y", "<f4"), ("normal_z", "<f4")])
+    rec["x"] = [1000, 2000]
+    rec["rgb"] = [0xFF0000, 0x0000FF]
+    rec["normal_z"] = 1
+    header = (
+        "# Post-capture rigid camera/rail refinement\nVERSION 0.7\nFIELDS x y z rgb normal_x normal_y normal_z\n"
+        "SIZE 4 4 4 4 4 4 4\nTYPE F F F U F F F\nCOUNT 1 1 1 1 1 1 1\nWIDTH 2\nHEIGHT 1\n"
+        "VIEWPOINT 0 0 0 1 0 0 0\nPOINTS 2\nDATA binary\n"
+    )
+    path = tmp_path / "scan.pcd"
+    path.write_bytes(header.encode("ascii") + rec.tobytes())
+
+    pcd = read_pcd(path)
+    assert np.allclose(np.asarray(pcd.points)[:, 0], [1000, 2000])
+    assert np.allclose(np.asarray(pcd.colors), [[1, 0, 0], [0, 0, 1]])
+    assert np.allclose(np.asarray(pcd.normals)[:, 2], 1)
+
+
 def test_points_roundtrip_and_overwrite_guard(tmp_path):
     cloud = tmp_path / "pipe.ply"
     rows = [{"x": 0.00127, "y": -5.16521, "z": -0.03731, "dx": 0.0, "dy": 0.02, "dz": 0.0}]
