@@ -7,6 +7,7 @@ from urdf_parser_py.urdf import URDF, Box, Cylinder, Mesh
 from pathlib import Path
 from scipy.spatial.transform import Rotation as R
 import json
+import xml.etree.ElementTree as ET
 import copy
 import math
 from typing import Any
@@ -78,6 +79,107 @@ class EndEffectorPoseOptimizer:
             "rt_joint_tcp",
         )
 
+    def load_end_effector_from_urdf(
+        self,
+        role: str,
+        file_path: str,
+        end_link_name: str,
+        tcp_link_name: str,
+        joint_positions: dict[str, float] | None = None,
+    ):
+        """임의 URDF 의 링크 하나를 DDA 또는 RT 엔드이펙터로 적재.
+
+        `load_DDA_from_urdf`/`load_RT_from_urdf` 는 엔드이펙터 전용 URDF 의 고정 이름
+        (`dda_link_end`·`dda_joint_tcp` 등)만 읽는다. 이 메서드는 검사룸 전체 URDF 처럼
+        엔드이펙터 링크와 TCP 링크가 트리의 어디에 있든 받아들인다. 두 링크의 월드 자세를
+        순기구학으로 구해 `link_end ← tcp` 상대 변환을 만들므로, 둘 사이에 가동 조인트가
+        있으면 `joint_positions`(조인트 이름 → rad 또는 m, 없으면 0)가 결과를 바꾼다.
+
+        Args:
+            role: "DDA" 또는 "RT".
+            file_path: URDF 파일 경로.
+            end_link_name: 충돌 형상을 가진 엔드이펙터 링크 이름.
+            tcp_link_name: TCP 프레임 링크 이름.
+            joint_positions: 순기구학에 쓸 조인트 값. 누락된 조인트는 0.
+        """
+        if role not in ("DDA", "RT"):
+            raise ValueError(f"role must be 'DDA' or 'RT', got {role!r}")
+        urdf, urdf_dir = self.__read_urdf(file_path)
+        collision_elements = self.__end_link_collisions(urdf, urdf_dir, end_link_name)
+        render_mesh = self.__build_render_mesh(collision_elements)
+
+        world = self.__link_world_transforms(urdf, joint_positions or {})
+        if tcp_link_name not in world:
+            raise KeyError(f"URDF 에 TCP 링크가 없습니다: {tcp_link_name}")
+        end_to_tcp = np.linalg.inv(world[end_link_name]) @ world[tcp_link_name]
+        tcp_to_end = np.linalg.inv(end_to_tcp)
+
+        if role == "DDA":
+            self.__dda_collision, self.__dda_mesh, self.__dda_invers_transform_mat = (
+                collision_elements, render_mesh, tcp_to_end,
+            )
+        else:
+            self.__rt_collision, self.__rt_mesh, self.__rt_invers_transform_mat = (
+                collision_elements, render_mesh, tcp_to_end,
+            )
+
+    @staticmethod
+    def __read_urdf(file_path: str) -> tuple[URDF, Path]:
+        """URDF 를 UTF-8 로 읽어 (파싱 결과, URDF 디렉터리) 반환.
+
+        urdf_parser_py 의 from_xml_file 은 인코딩 없이 open() 하므로 로케일 기본값
+        (예: Windows cp949)에서 비ASCII(한글 주석) URDF 가 UnicodeDecodeError 로 실패한다.
+        파일을 UTF-8 로 직접 읽어 파서에 넘겨 회피.
+
+        model_simplifier 는 `<robot version="1.1">` 을 항상 방출하는데(캡슐 지원용)
+        urdf_parser_py 는 1.0 만 받아 ValueError 를 낸다. 버전 속성만 1.0 으로 낮춰 읽는다 —
+        1.1 전용 요소인 `<capsule>` 은 이 파서가 모르므로 여전히 읽을 수 없다.
+        """
+        root = ET.fromstring(Path(file_path).read_text(encoding="utf-8"))
+        if root.get("version") not in (None, "1.0"):
+            root.set("version", "1.0")
+        xml_text = ET.tostring(root, encoding="unicode")
+        return URDF.from_xml_string(xml_text), Path(file_path).resolve().parent
+
+    def __end_link_collisions(self, urdf: URDF, urdf_dir: Path, end_link_name: str) -> list[dict]:
+        """엔드이펙터 링크의 다중 `<collision>` 을 충돌 요소 리스트로 변환(link_end 프레임)."""
+        if end_link_name not in urdf.link_map:
+            raise KeyError(f"URDF 에 엔드이펙터 링크가 없습니다: {end_link_name}")
+        collisions = urdf.link_map[end_link_name].collisions
+        if not collisions:
+            raise ValueError(f"엔드이펙터 링크에 collision 형상이 없습니다: {end_link_name}")
+        return [self.__build_collision_element(c, urdf_dir) for c in collisions]
+
+    @classmethod
+    def __link_world_transforms(cls, urdf: URDF, joint_positions: dict[str, float]) -> dict[str, np.ndarray]:
+        """모든 링크의 루트 기준 4×4 자세를 순기구학으로 계산.
+
+        조인트 origin 은 `__origin_to_matrix`(intrinsic "xyz") 규약을 따른다. 회전형
+        (revolute·continuous)은 축 둘레 회전, prismatic 은 축 방향 이동을 origin 뒤에 곱한다.
+        """
+        children: dict[str, list] = {}
+        child_links = set()
+        for joint in urdf.joints:
+            children.setdefault(joint.parent, []).append(joint)
+            child_links.add(joint.child)
+        roots = [link.name for link in urdf.links if link.name not in child_links]
+
+        world: dict[str, np.ndarray] = {}
+        stack = [(root, np.eye(4)) for root in roots]
+        while stack:
+            link_name, T = stack.pop()
+            world[link_name] = T
+            for joint in children.get(link_name, []):
+                q = float(joint_positions.get(joint.name, 0.0))
+                axis = np.asarray(joint.axis if joint.axis is not None else [1.0, 0.0, 0.0], dtype=float)
+                motion = np.eye(4)
+                if joint.type in ("revolute", "continuous") and q != 0.0:
+                    motion[:3, :3] = R.from_rotvec(axis / np.linalg.norm(axis) * q).as_matrix()
+                elif joint.type == "prismatic" and q != 0.0:
+                    motion[:3, 3] = axis / np.linalg.norm(axis) * q
+                stack.append((joint.child, T @ cls.__origin_to_matrix(joint.origin) @ motion))
+        return world
+
     def __extract_tcp_and_end(
         self,
         file_path: str,
@@ -106,19 +208,11 @@ class EndEffectorPoseOptimizer:
                 - render_mesh: 모든 요소를 병합한 시각화용 TriangleMesh(link_end 프레임).
                 - tcp_to_origin_mat: TCP → link_end 변환(4×4). joint_tcp origin 의 역행렬.
         """
-        # urdf 파일 로드---------------------------------------------------------
-        # UTF-8 명시 로드: urdf_parser_py 의 from_xml_file 은 인코딩 없이 open() 하므로
-        # 로케일 기본값(예: Windows cp949)에서 비ASCII(한글 주석) URDF 가
-        # UnicodeDecodeError 로 실패한다. 파일을 UTF-8 로 직접 읽어 파서에 넘겨 회피.
-        xml_text = Path(file_path).read_text(encoding="utf-8")
-        urdf: URDF = URDF.from_xml_string(xml_text)
-        urdf_dir = Path(file_path).resolve().parent
+        # urdf 파일 로드 (UTF-8 명시 — __read_urdf 참조) ------------------------------
+        urdf, urdf_dir = self.__read_urdf(file_path)
 
         # 엔드이펙터 collision 요소 추출 (다중 collision 순회) -----------------------
-        end_link = urdf.link_map[end_link_name]
-        collision_elements: list[dict] = []
-        for collision in end_link.collisions:
-            collision_elements.append(self.__build_collision_element(collision, urdf_dir))
+        collision_elements = self.__end_link_collisions(urdf, urdf_dir, end_link_name)
 
         # 시각화(하위호환)용 병합 렌더 메시 생성 -------------------------------------
         render_mesh = self.__build_render_mesh(collision_elements)

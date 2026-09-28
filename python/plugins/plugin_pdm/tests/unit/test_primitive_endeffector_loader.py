@@ -172,6 +172,65 @@ def test_old_urdf_single_mesh_backward_compat():
 
 
 # ============================================================================
+# 임의 URDF 링크 지정 적재 (load_end_effector_from_urdf)
+# ============================================================================
+
+
+def test_generic_loader_matches_fixed_name_loader(loaded):
+    """엔드이펙터 전용 URDF 를 링크 이름으로 지정해 읽어도 고정 이름 로더와 같은 결과."""
+    opt = EndEffectorPoseOptimizer(debug_mode=False)
+    opt.load_end_effector_from_urdf("DDA", str(DDA_URDF), "dda_link_end", "dda_link_tcp")
+    opt.load_end_effector_from_urdf("RT", str(RT_URDF), "rt_link_end", "rt_link_tcp")
+    for key in ("dda", "rt"):
+        assert np.allclose(_get(opt, f"{key}_invers_transform_mat"), _get(loaded, f"{key}_invers_transform_mat"))
+        assert [e["kind"] for e in _get(opt, f"{key}_collision")] == [e["kind"] for e in _get(loaded, f"{key}_collision")]
+
+
+def _write_urdf(tmp_path: Path, body: str, version: str = "1.0") -> Path:
+    path = tmp_path / "room.urdf"
+    path.write_text(f'<?xml version="1.0"?>\n<robot name="room" version="{version}">{body}</robot>', encoding="utf-8")
+    return path
+
+
+_ROOM_BODY = """
+<link name="base"/>
+<link name="ee"><collision><geometry><box size="0.1 0.1 0.1"/></geometry></collision></link>
+<link name="tcp"/>
+<joint name="j_ee" type="fixed"><parent link="base"/><child link="ee"/><origin xyz="1 0 0"/></joint>
+<joint name="j_slide" type="prismatic"><parent link="base"/><child link="tcp"/>
+  <origin xyz="1 0 0.5"/><axis xyz="0 0 1"/><limit lower="-1" upper="1" effort="1" velocity="1"/></joint>
+"""
+
+
+def test_generic_loader_tcp_on_sibling_branch(tmp_path):
+    """TCP 가 엔드이펙터의 자식이 아니어도(형제 가지) 순기구학으로 상대 변환을 구한다.
+
+    검사룸 URDF(export_v2)는 tcp_DDA 가 base_link 에 직접 붙어 있어 이 경우에 해당한다.
+    version="1.1"(model_simplifier 방출값)도 읽어야 한다.
+    """
+    path = _write_urdf(tmp_path, _ROOM_BODY, version="1.1")
+    opt = EndEffectorPoseOptimizer(debug_mode=False)
+    opt.load_end_effector_from_urdf("DDA", str(path), "ee", "tcp")
+    # ee=(1,0,0), tcp=(1,0,0.5) → tcp→ee 는 z -0.5 이동
+    expected = np.eye(4)
+    expected[2, 3] = -0.5
+    assert np.allclose(_get(opt, "dda_invers_transform_mat"), expected)
+
+    opt.load_end_effector_from_urdf("DDA", str(path), "ee", "tcp", joint_positions={"j_slide": 0.2})
+    expected[2, 3] = -0.7
+    assert np.allclose(_get(opt, "dda_invers_transform_mat"), expected)
+
+
+def test_generic_loader_rejects_link_without_collision(tmp_path):
+    path = _write_urdf(tmp_path, _ROOM_BODY)
+    opt = EndEffectorPoseOptimizer(debug_mode=False)
+    with pytest.raises(ValueError):
+        opt.load_end_effector_from_urdf("DDA", str(path), "tcp", "tcp")
+    with pytest.raises(KeyError):
+        opt.load_end_effector_from_urdf("DDA", str(path), "ee", "no_such_link")
+
+
+# ============================================================================
 # 해석적 충돌 (box / cylinder) 정확성 — 합성 스캔
 # ============================================================================
 
