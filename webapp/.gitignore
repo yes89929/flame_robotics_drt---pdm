@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.tsbuildinfo
+# 기동 로그 (run-dev.ps1)
+logs/
+# 루트 .gitignore 의 파이썬 템플릿 규칙 lib/ 가 화면 소스 폴더(src/lib)까지 무시하지 않게 되살린다
+!src/lib/

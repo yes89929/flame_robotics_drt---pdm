@@ -165,6 +165,19 @@ def test_3pair_with_partial_collisions(monkeypatch, mock_optimizer):
     )
 
 
+def test_last_candidates_records_every_candidate(monkeypatch, mock_optimizer):
+    """last_candidates 는 후보 전부(120개)를 각도 순으로 담고, DDA 충돌 후보를 표시한다."""
+    monkeypatch.setattr(mock_optimizer, _CHECK_COLLISION, _make_collision_check({5, 17}))
+    mock_optimizer.calculate_DDA_RT_pose_for_taking_xray_3pair_120(**_KWARGS)
+
+    cands = mock_optimizer.last_candidates
+    assert len(cands) == 120
+    assert [c["deg"] for c in cands[:3]] == [0.0, 3.0, 6.0]
+    assert {i for i, c in enumerate(cands) if c["status"] == "dda_collision"} == {5, 17}
+    assert all(c["status"] == "ok" for i, c in enumerate(cands) if i not in (5, 17))
+    assert mock_optimizer.pipe_profile == {"direction": [0.0, 1.0, 0.0], "center": [0.0, 0.0, 0.0], "radius": 0.05}
+
+
 def test_lexicographic_tiebreak_single_collision(monkeypatch, mock_optimizer):
     """인덱스 0 단일 충돌 → 사전순 최소 (1, 41, 81) 삼중쌍 선택 (편차 0).
 

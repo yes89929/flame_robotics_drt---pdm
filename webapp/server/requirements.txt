@@ -1,0 +1,5 @@
+# PDM 웹 도구 백엔드 추가 의존성 (plugin_pdm 의존성 위에 누적 설치 — conda env drt-pdm)
+fastapi
+uvicorn[standard]
+# 테스트 전용 (starlette TestClient)
+httpx2
