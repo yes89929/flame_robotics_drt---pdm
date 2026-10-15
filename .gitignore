@@ -190,3 +190,5 @@ python/plugins/plugin_pdm/tests/visual/_artifacts/
 
 # tools/export_poses.py 자세계산 산출물 (JSON/PNG, 로컬 생성물)
 python/plugins/plugin_pdm/output/
+# 커밋하지 않는 작업 산출물
+/temp/
