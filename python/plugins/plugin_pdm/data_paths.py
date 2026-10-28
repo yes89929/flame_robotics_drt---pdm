@@ -15,8 +15,10 @@ from pathlib import Path
 DATA_ROOT = Path(os.environ.get("PDM_DATA_ROOT", r"G:\내 드라이브\3. 과제\진행 과제\P2413；DRT\데이터"))
 
 # PIPE NO.{1,2,3}_fill.ply / _testpoint.csv
-PIPE_DATA_DIR = DATA_ROOT / "배관 데이터" / "한화오션 3종 cad to ply"
+# 데이터/배관 데이터.md 페이지의 첨부(과제 폴더 규칙 ADR-0070 — 데이터/attachments/<페이지 id>/)
+PIPE_DATA_DIR = DATA_ROOT / "attachments" / "20261010104901456" / "한화오션 3종 cad to ply"
 
 # URDF 의 메쉬 경로가 "../meshes/..." 상대표기이므로 robots/ 와 meshes/ 의 형제 관계를 유지한다.
-ROBOT_MODELS_DIR = DATA_ROOT / "로봇 모델" / "robot_models v1.5"
+# 데이터/로봇 모델.md 페이지의 첨부
+ROBOT_MODELS_DIR = DATA_ROOT / "attachments" / "20261010104901455" / "robot_models v1.5"
 ROBOTS_DIR = ROBOT_MODELS_DIR / "robots"

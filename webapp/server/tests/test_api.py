@@ -23,8 +23,9 @@ from pdm_web.testpoints import points_to_csv  # noqa: E402
 
 client = TestClient(app)
 
-ROOM_URDF = paths.DATA_ROOT / "검사룸 URDF" / "export_v2 2026-09-14" / "model.urdf"
-PIPE3_PLY = paths.DATA_ROOT / "배관 데이터" / "한화오션 3종 cad to ply" / "PIPE NO.3_fill.ply"
+# 옛 묶음 폴더 표기로 적고 resolve_path 로 지금 자리(attachments/<id>)를 찾는다 — 실데이터 경로 풀이도 함께 확인된다
+ROOM_URDF = paths.resolve_path(paths.DATA_ROOT / "검사룸 URDF" / "export_v2 2026-09-14" / "model.urdf")
+PIPE3_PLY = paths.resolve_path(paths.DATA_ROOT / "배관 데이터" / "한화오션 3종 cad to ply" / "PIPE NO.3_fill.ply")
 
 
 def test_urdf_model_parses_v11_capsule_mimic_package(tmp_path):
@@ -72,6 +73,34 @@ def test_cloud_load_guesses_mm_and_serves_binary(tmp_path):
     raw = client.get(f"/api/cloud/{meta['id']}/positions").content
     assert np.allclose(np.frombuffer(raw, "<f4").reshape(-1, 3), pts * 0.001)
     assert client.get("/api/cloud/nope/positions").status_code == 404
+
+
+def test_resolve_path_maps_legacy_bundle_to_attachments(tmp_path, monkeypatch):
+    """옛 `<옛 루트>/<묶음>/...` 경로를 데이터 페이지 id 의 첨부 폴더로 옮겨 찾는다."""
+    data = tmp_path / "데이터"
+    target = data / "attachments" / "20261010104901454" / "export_v2" / "model.urdf"
+    target.parent.mkdir(parents=True)
+    target.write_text("<robot/>", encoding="utf-8")
+    (data / "검사룸 URDF.md").write_text(
+        "---\nid: 20261010104901454\ntitle: 검사룸 URDF\n---\n", encoding="utf-8"
+    )
+    old_root = tmp_path / "3. 기타자료"
+    monkeypatch.setattr(paths, "DATA_ROOT", data)
+    monkeypatch.setattr(paths, "LEGACY_DATA_ROOTS", [old_root, data])
+
+    assert paths.resolve_path(old_root / "검사룸 URDF" / "export_v2" / "model.urdf") == target
+    assert paths.resolve_path(data / "검사룸 URDF" / "export_v2" / "model.urdf") == target
+    assert paths.resolve_path(old_root) == data
+    missing = old_root / "없는 묶음" / "a.ply"
+    assert paths.resolve_path(missing) == missing  # 못 찾으면 원래 경로 그대로 → 호출부가 404
+
+    # 파일 선택 창: 페이지 폴더에서는 묶음 첨부 폴더로 바로 가는 항목에, 숫자 id 폴더에는 페이지 제목을 붙인다
+    monkeypatch.setitem(paths.ROOTS, "과제 데이터", data)
+    top = client.get("/api/fs/list", params={"path": str(data)}).json()
+    assert top["dirs"] == ["attachments\\20261010104901454"]
+    assert top["labels"] == {"attachments\\20261010104901454": "검사룸 URDF"}
+    att = client.get("/api/fs/list", params={"path": str(data / "attachments")}).json()
+    assert att["labels"] == {"20261010104901454": "검사룸 URDF"}
 
 
 def test_read_pcd_with_comment_and_uint_rgb(tmp_path):

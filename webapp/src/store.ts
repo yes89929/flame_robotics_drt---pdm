@@ -127,8 +127,13 @@ export const useStore = create<State>((set, get) => ({
     set({ urdfBusy: true, urdfError: null })
     try {
       const model = await api.urdf(path)
-      const saved = LS.get<Designation | null>(`designation:${path}`, null)
-      LS.set('lastUrdf', path)
+      // 서버가 옛 데이터 경로를 지금 자리로 풀어 model.path 로 돌려준다 — 새 경로로 다시 기억하고,
+      // 옛 경로에 저장된 링크 지정도 새 경로로 옮긴다
+      const saved =
+        LS.get<Designation | null>(`designation:${model.path}`, null) ??
+        LS.get<Designation | null>(`designation:${path}`, null)
+      if (saved) LS.set(`designation:${model.path}`, saved)
+      LS.set('lastUrdf', model.path)
       set({
         urdf: model,
         joints: {},

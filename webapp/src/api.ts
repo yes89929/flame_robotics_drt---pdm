@@ -36,7 +36,14 @@ export interface UrdfModel {
   joints: UrdfJoint[]
 }
 
-export interface FsList { path: string; parent: string | null; dirs: string[]; files: { name: string; size: number }[] }
+export interface FsList {
+  path: string
+  parent: string | null
+  dirs: string[]
+  files: { name: string; size: number }[]
+  /** 폴더 이름 → 표시 이름 (과제 데이터 페이지 제목) */
+  labels: Record<string, string>
+}
 
 export interface CloudMeta {
   id: string
