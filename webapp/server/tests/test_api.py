@@ -94,6 +94,14 @@ def test_resolve_path_maps_legacy_bundle_to_attachments(tmp_path, monkeypatch):
     missing = old_root / "없는 묶음" / "a.ply"
     assert paths.resolve_path(missing) == missing  # 못 찾으면 원래 경로 그대로 → 호출부가 404
 
+    # 파일 선택 창: 페이지 폴더에서는 묶음 첨부 폴더로 바로 가는 항목에, 숫자 id 폴더에는 페이지 제목을 붙인다
+    monkeypatch.setitem(paths.ROOTS, "과제 데이터", data)
+    top = client.get("/api/fs/list", params={"path": str(data)}).json()
+    assert top["dirs"] == ["attachments\\20261010104901454"]
+    assert top["labels"] == {"attachments\\20261010104901454": "검사룸 URDF"}
+    att = client.get("/api/fs/list", params={"path": str(data / "attachments")}).json()
+    assert att["labels"] == {"20261010104901454": "검사룸 URDF"}
+
 
 def test_read_pcd_with_comment_and_uint_rgb(tmp_path):
     """현장 스캔 PCD 형식: 첫 줄 주석, rgb 가 U(uint32), normal_x..z — Open3D 는 0점으로 읽는다."""

@@ -71,7 +71,10 @@ export function FilePicker({
             <li className="dir" onClick={() => go(list.parent!)}>⬑ 상위 폴더</li>
           )}
           {list?.dirs.map((d) => (
-            <li key={d} className="dir" onClick={() => go(join(list.path, d))}>📁 {d}</li>
+            <li key={d} className="dir" onClick={() => go(join(list.path, d))}>
+              📁 {list.labels?.[d] ?? d}
+              {list.labels?.[d] && <span className="muted">{d}</span>}
+            </li>
           ))}
           {list?.files.map((f) => (
             <li key={f.name} className="file" onClick={() => onPick(join(list.path, f.name))}>

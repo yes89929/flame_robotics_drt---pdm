@@ -63,8 +63,17 @@ def fs_list(path: str, exts: str = "") -> dict[str, Any]:
             dirs.append(child.name)
         elif not want or child.suffix.lower() in want:
             files.append({"name": child.name, "size": child.stat().st_size})
+    # 과제 폴더 규칙: 묶음 파일은 `attachments\<페이지 id>` 에 있어 폴더 이름만으로는 무엇인지 모른다.
+    # 데이터 페이지 제목을 붙이고, 페이지가 있는 폴더에서는 묶음마다 첨부 폴더로 바로 들어가게 한다.
+    labels: dict[str, str] = {}
+    if d.name == "attachments":
+        labels = {p.name: title for title, p in paths.bundle_dirs(d.parent).items()}
+    elif (bundles := paths.bundle_dirs(d)):
+        shortcuts = {f"attachments\\{p.name}": title for title, p in bundles.items() if p.is_dir()}
+        dirs = sorted(shortcuts, key=shortcuts.get) + [x for x in dirs if x != "attachments"]
+        labels = shortcuts
     parent = d.parent if d.parent != d and paths.is_under_roots(d.parent) else None
-    return {"path": str(d), "parent": str(parent) if parent else None, "dirs": dirs, "files": files}
+    return {"path": str(d), "parent": str(parent) if parent else None, "dirs": dirs, "files": files, "labels": labels}
 
 
 @app.get("/api/fs/raw")
