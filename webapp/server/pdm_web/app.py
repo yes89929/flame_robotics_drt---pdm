@@ -34,7 +34,8 @@ MESH_EXTS = {".stl", ".dae", ".obj", ".ply"}
 
 
 def _existing(path: str) -> Path:
-    p = Path(path)
+    # 옛 데이터 경로(브라우저에 저장된 것 등)는 지금 자리로 풀어 읽는다 — 응답의 path 로 새 경로가 돌아간다
+    p = paths.resolve_path(path)
     if not p.exists():
         raise HTTPException(404, f"파일이 없습니다: {path}")
     return p
@@ -127,7 +128,7 @@ def cloud_unload(cloud_id: str) -> dict[str, bool]:
 
 @app.get("/api/points")
 def points_get(cloud_path: str) -> dict[str, Any]:
-    csv = csv_path_for(Path(cloud_path))
+    csv = csv_path_for(paths.resolve_path(cloud_path))
     rows = read_points(csv) if csv.is_file() else []
     return {"csv_path": str(csv), "exists": csv.is_file(), "rows": rows}
 
@@ -140,7 +141,7 @@ class PointsSave(BaseModel):
 
 @app.put("/api/points")
 def points_put(req: PointsSave) -> dict[str, Any]:
-    csv = csv_path_for(Path(req.cloud_path))
+    csv = csv_path_for(paths.resolve_path(req.cloud_path))
     if csv.exists() and not req.overwrite:
         raise HTTPException(409, f"이미 있는 파일입니다: {csv.name}")
     write_points(csv, req.rows)
@@ -173,5 +174,5 @@ class PdmRun(BaseModel):
 @app.post("/api/pdm/run")
 def pdm_run(req: PdmRun) -> dict[str, Any]:
     return runner.run(
-        clouds.get(req.cloud_id), req.urdf_path, req.dda.model_dump(), req.rt.model_dump(), req.joint_positions, req.params, req.point
+        clouds.get(req.cloud_id), str(paths.resolve_path(req.urdf_path)), req.dda.model_dump(), req.rt.model_dump(), req.joint_positions, req.params, req.point
     )
