@@ -22,24 +22,29 @@ export function FilePicker({
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const go = async (path: string) => {
+  /** 폴더로 이동. 성공 여부를 돌려준다. */
+  const go = async (path: string): Promise<boolean> => {
     setBusy(true)
     setError(null)
     try {
       const l = await api.list(path, exts)
       setList(l)
       localStorage.setItem(LAST_DIR_KEY(kind), l.path)
+      return true
     } catch (e) {
       setError((e as Error).message)
+      return false
     } finally {
       setBusy(false)
     }
   }
 
   useEffect(() => {
-    void api.roots().then((r) => {
+    void api.roots().then(async (r) => {
       setRoots(r)
-      void go(localStorage.getItem(LAST_DIR_KEY(kind)) ?? r[0].path)
+      // 마지막 폴더가 없어졌으면(데이터 폴더 이동 등) 첫 루트에서 시작한다
+      const last = localStorage.getItem(LAST_DIR_KEY(kind))
+      if (!last || !(await go(last))) await go(r[0].path)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
