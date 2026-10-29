@@ -175,7 +175,13 @@ class EndEffectorPoseOptimizer:
             link_name, T = stack.pop()
             world[link_name] = T
             for joint in children.get(link_name, []):
-                q = float(joint_positions.get(joint["name"], 0.0))
+                # mimic 조인트는 따라가는 조인트 값 × 배율 + 오프셋 (웹 화면 lib/urdf.ts jointValue 와 같은 식 —
+                # 화면은 구동 조인트 값만 보내므로 여기서 풀지 않으면 화면과 PDM 자세가 어긋난다)
+                mimic = joint.get("mimic")
+                if mimic:
+                    q = float(joint_positions.get(mimic["joint"], 0.0)) * mimic["multiplier"] + mimic["offset"]
+                else:
+                    q = float(joint_positions.get(joint["name"], 0.0))
                 axis = np.asarray(joint["axis"] if joint["axis"] is not None else [1.0, 0.0, 0.0], dtype=float)
                 motion = np.eye(4)
                 if joint["type"] in ("revolute", "continuous") and q != 0.0:

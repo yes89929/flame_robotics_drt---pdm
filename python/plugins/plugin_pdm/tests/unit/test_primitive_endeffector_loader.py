@@ -405,3 +405,26 @@ def test_missing_collision_mesh_file_is_rejected(tmp_path):
     path = _write_urdf(tmp_path, body)
     with pytest.raises(FileNotFoundError, match="none.stl"):
         EndEffectorPoseOptimizer().load_end_effector_from_urdf("DDA", str(path), "ee", "base")
+
+
+def test_generic_loader_applies_mimic_joint(tmp_path):
+    """엔드이펙터–TCP 사슬의 mimic 조인트는 따라가는 조인트 값×배율+오프셋으로 움직인다 (검사룸v2 구조)."""
+    body = """
+<link name="base"/><link name="carrier"/><link name="other"/>
+<link name="ee"><collision><geometry><box size="0.1 0.1 0.1"/></geometry></collision></link>
+<link name="tcp"/>
+<joint name="j_drive" type="prismatic"><parent link="base"/><child link="other"/><axis xyz="1 0 0"/>
+  <limit lower="-1" upper="1" effort="1" velocity="1"/></joint>
+<joint name="j_follow" type="prismatic"><parent link="base"/><child link="carrier"/><axis xyz="0 0 1"/>
+  <limit lower="-1" upper="1" effort="1" velocity="1"/><mimic joint="j_drive" multiplier="2" offset="0.1"/></joint>
+<joint name="j_ee" type="fixed"><parent link="carrier"/><child link="ee"/></joint>
+<joint name="j_tcp" type="fixed"><parent link="base"/><child link="tcp"/></joint>
+"""
+    path = _write_urdf(tmp_path, body, version="1.1")
+    opt = EndEffectorPoseOptimizer(debug_mode=False)
+    opt.load_end_effector_from_urdf("DDA", str(path), "ee", "tcp", joint_positions={"j_drive": 0.2})
+    # ee 는 z 로 0.2×2+0.1 = 0.5 올라가고 tcp 는 원점 → tcp 프레임에서 본 ee 는 z +0.5
+    # (mimic 을 무시하면 0 이 된다)
+    expected = np.eye(4)
+    expected[2, 3] = 0.5
+    assert np.allclose(_get(opt, "dda_invers_transform_mat"), expected)
