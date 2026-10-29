@@ -299,6 +299,10 @@ class EndEffectorPoseOptimizer:
         경로(`file`)는 파서가 URDF 디렉터리 기준 절대경로로 이미 풀어 둔다(`file://` 접두
         제거 포함). scale 은 [sx,sy,sz] 리스트(등방 가정, 첫 값 사용) 또는 스칼라를 허용한다.
         """
+        # 파일이 없으면 Open3D 는 경고만 내고 빈 메시를 돌려준다 — 그 부분은 어떤 점과도 충돌하지
+        # 않게 되므로(충돌 자세를 통과시킴) 적재 단계에서 멈춘다.
+        if not geometry.get("exists", Path(geometry["file"]).is_file()):
+            raise FileNotFoundError(f"엔드이펙터 충돌 메시 파일이 없습니다: {geometry['file']}")
         mesh = o3d.io.read_triangle_mesh(str(geometry["file"]))
 
         scale = geometry.get("scale")

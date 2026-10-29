@@ -396,3 +396,12 @@ def test_missing_geometry_attribute_names_link(tmp_path, shape):
     path = _write_urdf(tmp_path, body)
     with pytest.raises(ValueError, match="링크 ee"):
         EndEffectorPoseOptimizer().load_end_effector_from_urdf("DDA", str(path), "ee", "base")
+
+
+def test_missing_collision_mesh_file_is_rejected(tmp_path):
+    """collision 메시 파일이 없으면 빈 메시(충돌 없음)로 넘어가지 않고 적재를 거부한다."""
+    body = ('<link name="base"/><link name="ee"><collision><geometry><mesh filename="meshes/none.stl"/></geometry></collision></link>'
+            '<joint name="j" type="fixed"><parent link="base"/><child link="ee"/></joint>')
+    path = _write_urdf(tmp_path, body)
+    with pytest.raises(FileNotFoundError, match="none.stl"):
+        EndEffectorPoseOptimizer().load_end_effector_from_urdf("DDA", str(path), "ee", "base")
