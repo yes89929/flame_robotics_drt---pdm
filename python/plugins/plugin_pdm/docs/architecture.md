@@ -75,7 +75,7 @@ def on_btn_find_pose(self):
 ]
 ```
 
-- 좌표/각도는 모두 SI: 길이 m, 각도 라디안 (XYZ intrinsic Euler).
+- 좌표/각도는 모두 SI: 길이 m, 각도 라디안 (scipy 소문자 `"xyz"` = 고정축 X→Y→Z, URDF rpy 와 같음).
 - `RT1` 은 `+angle_of_rt`, `RT2` 는 `-angle_of_rt`. 둘 중 하나만 충돌 통과해도 그룹에는 그쪽만 들어간다 — 호출자가 어느 한쪽을 선택할 수 있게.
 - JSON 직렬화 버전(`pose_groups_json`)도 함께 반환되어 ZMQ 페이로드로 그대로 사용 가능.
 
