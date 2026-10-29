@@ -1,6 +1,6 @@
-"""URDF 를 화면용 JSON 모델로 변환.
+"""PDM·웹 도구가 함께 쓰는 URDF 파서 (URDF → dict 모델).
 
-urdf_parser_py 대신 ElementTree 로 직접 읽는다 — model_simplifier 가 방출하는
+ElementTree 로 직접 읽는다 — model_simplifier 가 방출하는
 `version="1.1"`·`<capsule>`·`<mimic>` 을 그대로 전달하기 위해서다. 변환 행렬은 만들지 않고
 xyz·rpy 원값을 넘긴다. rpy 는 URDF 표준(고정축 X→Y→Z, scipy `from_euler("xyz")`)이며
 화면(three.js)은 Euler 순서 'ZYX' 로 같은 회전을 만든다.
@@ -50,24 +50,46 @@ def resolve_mesh_path(filename: str, urdf_dir: Path) -> Path:
     return (p if p.is_absolute() else urdf_dir / p).resolve()
 
 
-def _geometry(el: ET.Element, urdf_dir: Path, materials: dict[str, list[float]]) -> dict[str, Any] | None:
+def _required(shape: ET.Element, attr: str, link: str, count: int = 1) -> list[float]:
+    """형상의 필수 숫자 속성. 없거나 개수가 틀리면 링크·태그를 밝혀 ValueError.
+
+    0 으로 채워 넘기면 PDM 에서 원인을 알 수 없는 Open3D 오류(반지름 ≤ 0 등)로 터진다.
+    """
+    text = shape.get(attr)
+    vals = [float(v) for v in text.split()] if text else []
+    if len(vals) != count:
+        raise ValueError(f"링크 {link}: <{shape.tag}> 의 {attr} 속성은 숫자 {count}개여야 합니다 (값: {text!r})")
+    return vals
+
+
+def _geometry(el: ET.Element, urdf_dir: Path, materials: dict[str, list[float]], link: str) -> dict[str, Any]:
+    """`<visual>`/`<collision>` 하나 → 형상 dict.
+
+    모르는 태그나 빈 `<geometry>` 는 버리지 않고 `type="unknown"` 으로 남긴다 — 조용히 빼면
+    PDM 엔드이펙터의 충돌 형상 일부가 오류 없이 사라진다. 화면은 unknown 을 그리지 않고,
+    PDM 충돌 엔진은 unknown 을 만나면 적재를 거부한다.
+    """
     g = el.find("geometry")
-    if g is None or len(g) == 0:
-        return None
-    shape = g[0]
     out: dict[str, Any] = {"origin": _origin(el)}
+    if g is None or len(g) == 0:
+        out.update(type="unknown", tag="")
+        return out
+    shape = g[0]
     tag = shape.tag
     if tag == "box":
-        out.update(type="box", size=_floats(shape.get("size"), 3))
+        out.update(type="box", size=_required(shape, "size", link, 3))
     elif tag in ("cylinder", "capsule"):
-        out.update(type=tag, radius=float(shape.get("radius", 0)), length=float(shape.get("length", 0)))
+        out.update(type=tag, radius=_required(shape, "radius", link)[0], length=_required(shape, "length", link)[0])
     elif tag == "sphere":
-        out.update(type="sphere", radius=float(shape.get("radius", 0)))
+        out.update(type="sphere", radius=_required(shape, "radius", link)[0])
     elif tag == "mesh":
-        path = resolve_mesh_path(shape.get("filename", ""), urdf_dir)
+        if not shape.get("filename"):
+            raise ValueError(f"링크 {link}: <mesh> 에 filename 속성이 없습니다")
+        path = resolve_mesh_path(shape.get("filename"), urdf_dir)
         out.update(type="mesh", file=str(path), exists=path.is_file(), scale=_floats(shape.get("scale"), 3, 1.0))
     else:
-        return None
+        out.update(type="unknown", tag=tag)
+        return out
 
     mat = el.find("material")
     if mat is not None:
@@ -91,8 +113,9 @@ def load_urdf_model(path: Path) -> dict[str, Any]:
 
     links = []
     for link in root.findall("link"):
-        visuals = [g for v in link.findall("visual") if (g := _geometry(v, urdf_dir, materials))]
-        collisions = [g for c in link.findall("collision") if (g := _geometry(c, urdf_dir, materials))]
+        name = link.get("name")
+        visuals = [_geometry(v, urdf_dir, materials, name) for v in link.findall("visual")]
+        collisions = [_geometry(c, urdf_dir, materials, name) for c in link.findall("collision")]
         links.append({"name": link.get("name"), "visuals": visuals, "collisions": collisions})
 
     joints = []

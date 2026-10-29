@@ -87,6 +87,7 @@ PCD + g_point ──► [A1] 배관 프로파일 추정 (방향, 중심, 반경)
 |------|------|-----------|
 | `box` | `half`(3,), `T`(4×4, link_end←box) | **해석적 point-in-box** |
 | `cylinder` | `radius`, `half_len`, `T` | **해석적 point-in-cylinder** (축=로컬 z) |
+| `capsule` | `radius`, `half_len`(=`<capsule length>`/2, 반구 캡 제외), `T` | **해석적 point-in-capsule** (축=로컬 z) |
 | `mesh` | `mesh`(link_end 프레임 o3d) | 기존 표면 샘플링 방식 (slab·구형 URDF) |
 
 ### 공통 전처리
@@ -98,6 +99,8 @@ PCD + g_point ──► [A1] 배관 프로파일 추정 (방향, 중심, 반경)
 3. 남은 점을 프리미티브 **로컬 프레임으로 역변환**(정규직교 회전은 전치가 역행렬):
    - box: 모든 축 `|좌표| ≤ half + margin` 이면 충돌.
    - cylinder: `|z| ≤ half_len + margin` 이고 `√(x²+y²) ≤ radius + margin` 이면 충돌.
+   - capsule: z 를 `[-half_len, half_len]` 로 자른 축 위 점까지의 거리가 `radius + margin` 이하이면 충돌
+     (URDF 1.1 `<capsule length>` 는 반구 캡을 뺀 원기둥 부분 길이 — 전체 길이는 `length + 2·radius`).
 
 메쉬 5000점 샘플링 없이 스캔 점의 포함 여부를 직접 판정하므로 빠르고, 회전 박스도
 정확히 처리한다(과거 단일-mesh 방식의 AABB 누락 위험 제거).

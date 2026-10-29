@@ -3,7 +3,9 @@
 export interface Origin { xyz: number[]; rpy: number[] }
 
 export interface Geometry {
-  type: 'box' | 'cylinder' | 'capsule' | 'sphere' | 'mesh'
+  /** unknown = 파서가 모르는 태그나 빈 <geometry> — 화면은 그리지 않는다 */
+  type: 'box' | 'cylinder' | 'capsule' | 'sphere' | 'mesh' | 'unknown'
+  tag?: string
   origin: Origin
   size?: number[]
   radius?: number
