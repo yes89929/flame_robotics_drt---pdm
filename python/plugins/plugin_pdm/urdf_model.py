@@ -1,6 +1,6 @@
-"""URDF 를 화면용 JSON 모델로 변환.
+"""PDM·웹 도구가 함께 쓰는 URDF 파서 (URDF → dict 모델).
 
-urdf_parser_py 대신 ElementTree 로 직접 읽는다 — model_simplifier 가 방출하는
+ElementTree 로 직접 읽는다 — model_simplifier 가 방출하는
 `version="1.1"`·`<capsule>`·`<mimic>` 을 그대로 전달하기 위해서다. 변환 행렬은 만들지 않고
 xyz·rpy 원값을 넘긴다. rpy 는 URDF 표준(고정축 X→Y→Z, scipy `from_euler("xyz")`)이며
 화면(three.js)은 Euler 순서 'ZYX' 로 같은 회전을 만든다.

@@ -17,7 +17,7 @@ from . import paths
 from .clouds import CloudStore
 from .pdm_runner import DEFAULT_PARAMS, PdmRunner
 from .testpoints import csv_path_for, read_points, write_points
-from .urdf_model import load_urdf_model
+from urdf_model import load_urdf_model  # plugin_pdm 소속 — `paths` 가 sys.path 에 올린 뒤에만 임포트된다
 
 app = FastAPI(title="PDM 웹 도구")
 clouds = CloudStore()

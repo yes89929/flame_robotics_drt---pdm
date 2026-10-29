@@ -126,10 +126,10 @@ def test_rotated_box_roundtrip_and_convention(loaded):
 def test_loads_under_non_utf8_locale():
     """비ASCII(한글 주석) URDF 를 non-UTF8(cp949 등) 로케일에서도 로드해야 한다.
 
-    회귀 방지: urdf_parser_py 의 from_xml_file 은 인코딩 없이 open() 하므로 로케일 기본값이
-    UTF-8 이 아니면 한글 주석 URDF 가 UnicodeDecodeError 로 실패한다. 로더는 UTF-8 명시
+    회귀 방지: 파일을 인코딩 없이 open() 하면 로케일 기본값이 UTF-8 이 아닐 때 한글 주석
+    URDF 가 UnicodeDecodeError 로 실패한다. 파서(urdf_model.load_urdf_model)는 UTF-8 명시
     읽기로 이를 회피해야 하며, 이 테스트는 자식 프로세스를 `-X utf8=0`(UTF-8 모드 강제 해제)
-    으로 띄워 로케일 독립적으로 검증한다. (from_xml_file 로 되돌리면 이 테스트가 실패한다.)
+    으로 띄워 로케일 독립적으로 검증한다. (인코딩 없는 읽기로 되돌리면 이 테스트가 실패한다.)
     """
     _require(DDA_URDF, RT_URDF)
     plugin_root = str(PLUGIN_PDM_ROOT)

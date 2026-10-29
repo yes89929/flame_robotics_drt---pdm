@@ -3,11 +3,10 @@ from open3d.cpu.pybind.geometry import PointCloud  # type: ignore
 import numpy as np
 from numpy.typing import NDArray
 from CylinderFitting import fit_cylinder
-from urdf_parser_py.urdf import URDF, Box, Cylinder, Mesh
+from urdf_model import load_urdf_model
 from pathlib import Path
 from scipy.spatial.transform import Rotation as R
 import json
-import xml.etree.ElementTree as ET
 import copy
 import math
 from typing import Any
@@ -117,8 +116,8 @@ class EndEffectorPoseOptimizer:
         """
         if role not in ("DDA", "RT"):
             raise ValueError(f"role must be 'DDA' or 'RT', got {role!r}")
-        urdf, urdf_dir = self.__read_urdf(file_path)
-        collision_elements = self.__end_link_collisions(urdf, urdf_dir, end_link_name)
+        urdf = self.__read_urdf(file_path)
+        collision_elements = self.__end_link_collisions(urdf, end_link_name)
         render_mesh = self.__build_render_mesh(collision_elements)
 
         world = self.__link_world_transforms(urdf, joint_positions or {})
@@ -137,34 +136,27 @@ class EndEffectorPoseOptimizer:
             )
 
     @staticmethod
-    def __read_urdf(file_path: str) -> tuple[URDF, Path]:
-        """URDF 를 UTF-8 로 읽어 (파싱 결과, URDF 디렉터리) 반환.
+    def __read_urdf(file_path: str) -> dict:
+        """URDF 를 자체 파서(`urdf_model.load_urdf_model`)로 읽어 dict 모델 반환.
 
-        urdf_parser_py 의 from_xml_file 은 인코딩 없이 open() 하므로 로케일 기본값
-        (예: Windows cp949)에서 비ASCII(한글 주석) URDF 가 UnicodeDecodeError 로 실패한다.
-        파일을 UTF-8 로 직접 읽어 파서에 넘겨 회피.
-
-        model_simplifier 는 `<robot version="1.1">` 을 항상 방출하는데(캡슐 지원용)
-        urdf_parser_py 는 1.0 만 받아 ValueError 를 낸다. 버전 속성만 1.0 으로 낮춰 읽는다 —
-        1.1 전용 요소인 `<capsule>` 은 이 파서가 모르므로 여전히 읽을 수 없다.
+        파서가 파일을 UTF-8 로 직접 읽으므로 로케일 기본값(예: Windows cp949)과 무관하게
+        비ASCII(한글 주석) URDF 를 읽는다. `version="1.1"`·`<capsule>`·`<mimic>` 도 받는다.
+        메시 경로는 파서가 URDF 디렉터리 기준 절대경로로 풀어 둔다.
         """
-        root = ET.fromstring(Path(file_path).read_text(encoding="utf-8"))
-        if root.get("version") not in (None, "1.0"):
-            root.set("version", "1.0")
-        xml_text = ET.tostring(root, encoding="unicode")
-        return URDF.from_xml_string(xml_text), Path(file_path).resolve().parent
+        return load_urdf_model(Path(file_path))
 
-    def __end_link_collisions(self, urdf: URDF, urdf_dir: Path, end_link_name: str) -> list[dict]:
+    def __end_link_collisions(self, urdf: dict, end_link_name: str) -> list[dict]:
         """엔드이펙터 링크의 다중 `<collision>` 을 충돌 요소 리스트로 변환(link_end 프레임)."""
-        if end_link_name not in urdf.link_map:
+        link_map = {link["name"]: link for link in urdf["links"]}
+        if end_link_name not in link_map:
             raise KeyError(f"URDF 에 엔드이펙터 링크가 없습니다: {end_link_name}")
-        collisions = urdf.link_map[end_link_name].collisions
+        collisions = link_map[end_link_name]["collisions"]
         if not collisions:
             raise ValueError(f"엔드이펙터 링크에 collision 형상이 없습니다: {end_link_name}")
-        return [self.__build_collision_element(c, urdf_dir) for c in collisions]
+        return [self.__build_collision_element(c) for c in collisions]
 
     @classmethod
-    def __link_world_transforms(cls, urdf: URDF, joint_positions: dict[str, float]) -> dict[str, np.ndarray]:
+    def __link_world_transforms(cls, urdf: dict, joint_positions: dict[str, float]) -> dict[str, np.ndarray]:
         """모든 링크의 루트 기준 4×4 자세를 순기구학으로 계산.
 
         조인트 origin 은 `__origin_to_matrix`(intrinsic "xyz") 규약을 따른다. 회전형
@@ -172,10 +164,10 @@ class EndEffectorPoseOptimizer:
         """
         children: dict[str, list] = {}
         child_links = set()
-        for joint in urdf.joints:
-            children.setdefault(joint.parent, []).append(joint)
-            child_links.add(joint.child)
-        roots = [link.name for link in urdf.links if link.name not in child_links]
+        for joint in urdf["joints"]:
+            children.setdefault(joint["parent"], []).append(joint)
+            child_links.add(joint["child"])
+        roots = [link["name"] for link in urdf["links"] if link["name"] not in child_links]
 
         world: dict[str, np.ndarray] = {}
         stack = [(root, np.eye(4)) for root in roots]
@@ -183,14 +175,14 @@ class EndEffectorPoseOptimizer:
             link_name, T = stack.pop()
             world[link_name] = T
             for joint in children.get(link_name, []):
-                q = float(joint_positions.get(joint.name, 0.0))
-                axis = np.asarray(joint.axis if joint.axis is not None else [1.0, 0.0, 0.0], dtype=float)
+                q = float(joint_positions.get(joint["name"], 0.0))
+                axis = np.asarray(joint["axis"] if joint["axis"] is not None else [1.0, 0.0, 0.0], dtype=float)
                 motion = np.eye(4)
-                if joint.type in ("revolute", "continuous") and q != 0.0:
+                if joint["type"] in ("revolute", "continuous") and q != 0.0:
                     motion[:3, :3] = R.from_rotvec(axis / np.linalg.norm(axis) * q).as_matrix()
-                elif joint.type == "prismatic" and q != 0.0:
+                elif joint["type"] == "prismatic" and q != 0.0:
                     motion[:3, 3] = axis / np.linalg.norm(axis) * q
-                stack.append((joint.child, T @ cls.__origin_to_matrix(joint.origin) @ motion))
+                stack.append((joint["child"], T @ cls.__origin_to_matrix(joint["origin"]) @ motion))
         return world
 
     def __extract_tcp_and_end(
@@ -222,25 +214,26 @@ class EndEffectorPoseOptimizer:
                 - tcp_to_origin_mat: TCP → link_end 변환(4×4). joint_tcp origin 의 역행렬.
         """
         # urdf 파일 로드 (UTF-8 명시 — __read_urdf 참조) ------------------------------
-        urdf, urdf_dir = self.__read_urdf(file_path)
+        urdf = self.__read_urdf(file_path)
 
         # 엔드이펙터 collision 요소 추출 (다중 collision 순회) -----------------------
-        collision_elements = self.__end_link_collisions(urdf, urdf_dir, end_link_name)
+        collision_elements = self.__end_link_collisions(urdf, end_link_name)
 
         # 시각화(하위호환)용 병합 렌더 메시 생성 -------------------------------------
         render_mesh = self.__build_render_mesh(collision_elements)
 
         # tcp와 엔드이펙터 형상 위치관계 정보 추출-----------------------------------
         # joint_tcp origin = link_end ← tcp 변환. 역변환이 tcp → link_end.
-        tcp_joint_origin_T = self.__origin_to_matrix(urdf.joint_map[tcp_joint_name].origin)
+        joint_map = {joint["name"]: joint for joint in urdf["joints"]}
+        tcp_joint_origin_T = self.__origin_to_matrix(joint_map[tcp_joint_name]["origin"])
         tcp_to_origin_mat = np.linalg.inv(tcp_joint_origin_T)
 
         # ----------------------------------------------------------------------
         return collision_elements, render_mesh, tcp_to_origin_mat
 
     @staticmethod
-    def __origin_to_matrix(origin) -> np.ndarray:
-        """URDF `<origin>` 요소를 4×4 변환 행렬로 변환.
+    def __origin_to_matrix(origin: dict | None) -> np.ndarray:
+        """URDF `<origin>` dict(`{"xyz":[3], "rpy":[3]}`)를 4×4 변환 행렬로 변환.
 
         rpy 는 scipy **intrinsic** `R.from_euler("xyz", rpy)` (소문자) 규약으로 해석한다.
         ⚠️ 주의: 이는 URDF 표준(고정축 extrinsic XYZ)이 아니다. 대상 엔드이펙터 URDF 는
@@ -252,56 +245,51 @@ class EndEffectorPoseOptimizer:
         T = np.eye(4)
         if origin is None:
             return T
-        if getattr(origin, "rpy", None) is not None:
-            T[:3, :3] = R.from_euler("xyz", origin.rpy).as_matrix()
-        if getattr(origin, "xyz", None) is not None:
-            T[:3, 3] = np.asarray(origin.xyz, dtype=float)
+        if origin.get("rpy") is not None:
+            T[:3, :3] = R.from_euler("xyz", origin["rpy"]).as_matrix()
+        if origin.get("xyz") is not None:
+            T[:3, 3] = np.asarray(origin["xyz"], dtype=float)
         return T
 
-    def __build_collision_element(self, collision, urdf_dir: Path) -> dict:
-        """단일 URDF `<collision>` 을 충돌 요소 dict 로 변환.
+    def __build_collision_element(self, collision: dict) -> dict:
+        """파서의 형상 dict 하나를 충돌 요소 dict 로 변환.
 
         box/cylinder 는 해석적 포함검사에 쓰이는 half-extent·반경/길이와 origin 변환(T)을
         보관한다. mesh 는 origin 변환·scale 을 적용한 o3d TriangleMesh(link_end 프레임)를
         보관한다.
         """
-        geometry = collision.geometry
-        T = self.__origin_to_matrix(collision.origin)  # link_end ← primitive
+        geom_type = collision["type"]
+        T = self.__origin_to_matrix(collision.get("origin"))  # link_end ← primitive
 
-        if isinstance(geometry, Box):
-            half = np.asarray(geometry.size, dtype=float) / 2.0
+        if geom_type == "box":
+            half = np.asarray(collision["size"], dtype=float) / 2.0
             return {"kind": "box", "half": half, "T": T}
 
-        if isinstance(geometry, Cylinder):
+        if geom_type == "cylinder":
             return {
                 "kind": "cylinder",
-                "radius": float(geometry.radius),
-                "half_len": float(geometry.length) / 2.0,
+                "radius": float(collision["radius"]),
+                "half_len": float(collision["length"]) / 2.0,
                 "T": T,
             }
 
-        if isinstance(geometry, Mesh):
-            mesh = self.__load_mesh_geometry(geometry, urdf_dir)
+        if geom_type == "mesh":
+            mesh = self.__load_mesh_geometry(collision)
             mesh = mesh.transform(T)  # type: ignore  # origin 적용 → link_end 프레임
             return {"kind": "mesh", "mesh": mesh}
 
-        raise ValueError(f"지원하지 않는 collision geometry 타입입니다: {type(geometry).__name__}")
+        raise ValueError(f"지원하지 않는 collision geometry 타입입니다: {geom_type}")
 
     @staticmethod
-    def __load_mesh_geometry(geometry, urdf_dir: Path) -> o3d.geometry.TriangleMesh:
-        """URDF Mesh geometry 를 scale 을 적용한 o3d TriangleMesh 로 로드.
+    def __load_mesh_geometry(geometry: dict) -> o3d.geometry.TriangleMesh:
+        """파서의 mesh 형상 dict 를 scale 을 적용한 o3d TriangleMesh 로 로드.
 
-        경로는 URDF 표준 상대경로("../meshes/...")로 간주하고 URDF 디렉터리 기준으로
-        해석한다. `file://` 접두는 제거한다. scale 은 [sx,sy,sz] 리스트(등방 가정, 첫 값
-        사용) 또는 스칼라를 허용한다.
+        경로(`file`)는 파서가 URDF 디렉터리 기준 절대경로로 이미 풀어 둔다(`file://` 접두
+        제거 포함). scale 은 [sx,sy,sz] 리스트(등방 가정, 첫 값 사용) 또는 스칼라를 허용한다.
         """
-        filename = geometry.filename
-        if filename.startswith("file://"):
-            filename = filename[len("file://"):]
-        mesh_path = (urdf_dir / filename).resolve()
-        mesh = o3d.io.read_triangle_mesh(str(mesh_path))
+        mesh = o3d.io.read_triangle_mesh(str(geometry["file"]))
 
-        scale = geometry.scale
+        scale = geometry.get("scale")
         if scale is None:
             scale_factor = 1.0
         elif isinstance(scale, (list, tuple, np.ndarray)):

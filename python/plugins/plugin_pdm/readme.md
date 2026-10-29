@@ -235,7 +235,7 @@ pose_groups_json, pose_groups = opt.calculate_DDA_RT_pose_for_taking_xray(
 
 - `open3d` — 점군/메쉬, 충돌 후보의 AABB·샘플링 처리
 - `numpy`, `scikit-learn`, `pandas`
-- `urdf_parser_py` — DDA/RT URDF 파싱 (베이스 워크스페이스의 `urdf_parser/` 와는 다른 외부 패키지)
+- `urdf_model.py`(자체 파서, ElementTree) — DDA/RT URDF 파싱. 웹 도구도 같은 파서를 쓴다
 - `pyvista[all,trame]`, `ipympl`, `ipywidgets` — Jupyter 노트북 가시화
 
 > 메인 워크스페이스의 `requirements.txt` (저장소 루트) 위에 본 플러그인용을 **추가 설치**하는 구조다. 단독 실행 시:
