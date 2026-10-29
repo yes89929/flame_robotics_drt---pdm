@@ -254,7 +254,7 @@ class EndEffectorPoseOptimizer:
     def __build_collision_element(self, collision: dict) -> dict:
         """파서의 형상 dict 하나를 충돌 요소 dict 로 변환.
 
-        box/cylinder 는 해석적 포함검사에 쓰이는 half-extent·반경/길이와 origin 변환(T)을
+        box/cylinder/capsule 은 해석적 판정에 쓰이는 half-extent·반경/길이와 origin 변환(T)을
         보관한다. mesh 는 origin 변환·scale 을 적용한 o3d TriangleMesh(link_end 프레임)를
         보관한다.
         """
@@ -268,6 +268,17 @@ class EndEffectorPoseOptimizer:
         if geom_type == "cylinder":
             return {
                 "kind": "cylinder",
+                "radius": float(collision["radius"]),
+                "half_len": float(collision["length"]) / 2.0,
+                "T": T,
+            }
+
+        if geom_type == "capsule":
+            # URDF 1.1·model_simplifier 규약: length 는 반구 캡을 뺀 원기둥 부분 길이
+            # (전체 길이 = length + 2*radius). 축은 로컬 z. 전체 길이로 읽으면 캡 두 개만큼
+            # (2r) 충돌 영역이 부풀어 오판하므로 half_len 은 반드시 length/2 다.
+            return {
+                "kind": "capsule",
                 "radius": float(collision["radius"]),
                 "half_len": float(collision["length"]) / 2.0,
                 "T": T,
@@ -328,6 +339,17 @@ class EndEffectorPoseOptimizer:
                 )
                 cyl = cyl.transform(element["T"])  # type: ignore
                 merged += cyl
+            elif kind == "capsule":
+                h = element["half_len"]
+                r = element["radius"]
+                # 원기둥(높이 2h) + 양끝(z=±h) 구 두 개(구의 안쪽 절반은 원기둥과 겹쳐 무해)
+                cap = o3d.geometry.TriangleMesh.create_cylinder(radius=r, height=2.0 * h)
+                for sign in (-1.0, 1.0):
+                    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=r)
+                    sphere = sphere.translate((0.0, 0.0, sign * h))  # type: ignore
+                    cap += sphere
+                cap = cap.transform(element["T"])  # type: ignore
+                merged += cap
             elif kind == "mesh":
                 merged += element["mesh"]
         return merged
@@ -1191,7 +1213,7 @@ class EndEffectorPoseOptimizer:
     ) -> bool:
         """엔드이펙터 충돌 요소들과 로드된 스캔 점군 간 충돌 여부 검사.
 
-        box/cylinder 프리미티브는 스캔 점을 각 요소의 로컬 프레임으로 역변환해 해석적
+        box/cylinder/capsule 프리미티브는 스캔 점을 각 요소의 로컬 프레임으로 역변환해 해석적
         포함검사(설계이념: 연산 최적화)를 수행하고, mesh 요소만 기존 표면 샘플링 방식으로
         검사한다. 요소 중 하나라도 충돌하면 즉시 True 를 반환한다.
 
@@ -1245,6 +1267,12 @@ class EndEffectorPoseOptimizer:
                     sub_points, element["radius"], element["half_len"], world_T, collision_margin
                 ):
                     return True
+            elif kind == "capsule":
+                world_T = link_pose_T @ element["T"]  # world ← capsule
+                if self.__collision_capsule(
+                    sub_points, element["radius"], element["half_len"], world_T, collision_margin
+                ):
+                    return True
             elif kind == "mesh":
                 if self.__collision_mesh(
                     element["mesh"], link_pose_T, collision_margin, sub_pcd, sample_count
@@ -1256,7 +1284,7 @@ class EndEffectorPoseOptimizer:
     def __ee_local_aabb(collision_elements: list[dict]) -> tuple[np.ndarray, np.ndarray]:
         """모든 충돌 요소를 감싸는 link_end 프레임 AABB (min, max) 계산 (브로드페이즈용).
 
-        box/cylinder 는 회전 origin(T)을 반영한 8개 코너로 범위를 잡고, mesh 는 자신의
+        box/cylinder/capsule 은 회전 origin(T)을 반영한 8개 코너로 범위를 잡고, mesh 는 자신의
         로컬 AABB 를 사용한다. 요소가 없으면 원점 축퇴 AABB 를 반환한다.
         """
         signs = np.array(
@@ -1266,9 +1294,14 @@ class EndEffectorPoseOptimizer:
         maxs: list[np.ndarray] = []
         for element in collision_elements:
             kind = element["kind"]
-            if kind in ("box", "cylinder"):
+            if kind in ("box", "cylinder", "capsule"):
                 if kind == "box":
                     ext = element["half"]
+                elif kind == "capsule":
+                    # 반구 캡까지 포함: 축 방향 반길이 = half_len + radius
+                    ext = np.array(
+                        [element["radius"], element["radius"], element["half_len"] + element["radius"]]
+                    )
                 else:
                     ext = np.array([element["radius"], element["radius"], element["half_len"]])
                 T = element["T"]
@@ -1324,6 +1357,30 @@ class EndEffectorPoseOptimizer:
         axial = np.abs(local[:, 2]) <= (half_len + margin)
         radial = np.hypot(local[:, 0], local[:, 1]) <= (radius + margin)
         return bool((axial & radial).any())
+
+    @staticmethod
+    def __collision_capsule(
+        sub_points: np.ndarray,
+        radius: float,
+        half_len: float,
+        world_T: np.ndarray,
+        margin: float,
+    ) -> bool:
+        """브로드페이즈로 좁힌 부분점군과 캡슐(축=로컬 z)의 해석적 판정.
+
+        점을 캡슐 로컬로 옮긴 뒤 z 를 [-half_len, half_len] 로 자른 축 위 점까지의 거리가
+        radius+margin 이하인 점이 하나라도 있으면 충돌. half_len 은 반구 캡을 뺀 원기둥
+        부분의 반길이이며, z 를 자른 거리라 양끝의 반구 캡이 자연히 포함된다.
+        """
+        if sub_points.shape[0] == 0:
+            return False
+        rot = world_T[:3, :3]
+        pos = world_T[:3, 3]
+        local = (sub_points - pos) @ rot
+        nearest = np.zeros_like(local)
+        nearest[:, 2] = np.clip(local[:, 2], -half_len, half_len)
+        dist = np.linalg.norm(local - nearest, axis=1)
+        return bool((dist <= (radius + margin)).any())
 
     def __collision_mesh(
         self,

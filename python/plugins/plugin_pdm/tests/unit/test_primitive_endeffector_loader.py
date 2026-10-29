@@ -292,6 +292,71 @@ def test_analytic_cylinder_axial_limit():
     assert cc([cyl], _IDENTITY_POSE, np.eye(4)) is False
 
 
+def _capsule(radius=0.1, half_len=0.2, T=None):
+    return {"kind": "capsule", "radius": radius, "half_len": half_len, "T": np.eye(4) if T is None else T}
+
+
+def test_analytic_capsule_cylinder_part():
+    """캡슐 원기둥부: 반경 안 점은 충돌, 반경 밖 점은 비충돌."""
+    inside = _get(_fake_with_scan(np.array([[0.05, 0.0, 0.1]])), "check_collision")
+    outside = _get(_fake_with_scan(np.array([[0.3, 0.0, 0.1]])), "check_collision")
+    assert inside([_capsule()], _IDENTITY_POSE, np.eye(4)) is True
+    assert outside([_capsule()], _IDENTITY_POSE, np.eye(4)) is False
+
+
+def test_analytic_capsule_hemisphere_cap():
+    """반구 캡: 원기둥 끝(z=h)을 넘은 캡 안 점은 충돌, 캡 너머 점은 비충돌.
+
+    h=0.2, r=0.1. 점 (0,0,h+0.5r) 는 원기둥(|z|<=h)으로 판정했다면 비충돌이지만 캡 안이라
+    충돌이어야 한다. 점 (0,0,h+r+0.01) 는 캡 너머라 비충돌 -- length 를 전체 길이로 잘못
+    읽어 half_len 을 h+r 로 잡았다면 이 점 근처가 충돌로 바뀐다. 모서리 점 (0.09,0,h+0.09)
+    는 축 위 끝점까지 거리 0.127 > r 라 반구 밖이다(원기둥+높이 확장이나 박스 근사였다면
+    충돌로 나왔을 위치).
+    """
+    h, r = 0.2, 0.1
+    in_cap = _get(_fake_with_scan(np.array([[0.0, 0.0, h + 0.5 * r]])), "check_collision")
+    beyond = _get(_fake_with_scan(np.array([[0.0, 0.0, h + r + 0.01]])), "check_collision")
+    corner = _get(_fake_with_scan(np.array([[0.09, 0.0, h + 0.09]])), "check_collision")
+    assert in_cap([_capsule(r, h)], _IDENTITY_POSE, np.eye(4)) is True
+    assert beyond([_capsule(r, h)], _IDENTITY_POSE, np.eye(4)) is False
+    assert corner([_capsule(r, h)], _IDENTITY_POSE, np.eye(4)) is False
+
+
+def test_analytic_capsule_respects_rotation():
+    """회전 캡슐: 로컬 z 축을 world x 로 눕히면 world x=+0.25 (캡 안) 충돌, z=+0.25 비충돌."""
+    T = np.eye(4)
+    T[:3, :3] = R.from_euler("XYZ", [0.0, np.pi / 2, 0.0]).as_matrix()  # 로컬 z -> world x
+    cap = _capsule(0.1, 0.2, T)
+    along = _get(_fake_with_scan(np.array([[0.25, 0.0, 0.0]])), "check_collision")
+    across = _get(_fake_with_scan(np.array([[0.0, 0.0, 0.25]])), "check_collision")
+    assert along([cap], _IDENTITY_POSE, np.eye(4)) is True
+    assert across([cap], _IDENTITY_POSE, np.eye(4)) is False
+
+
+def test_capsule_urdf_loads_with_render_mesh(tmp_path):
+    """<capsule> collision 을 가진 version="1.1" URDF 를 적재하면 capsule 요소와 렌더 메시가 나온다."""
+    body = """
+<link name="base"/>
+<link name="ee"><collision><origin xyz="0 0 0.1"/><geometry><capsule radius="0.05" length="0.2"/></geometry></collision></link>
+<link name="tcp"/>
+<joint name="j_ee" type="fixed"><parent link="base"/><child link="ee"/><origin xyz="1 0 0"/></joint>
+<joint name="j_tcp" type="fixed"><parent link="ee"/><child link="tcp"/><origin xyz="0 0 0.3"/></joint>
+"""
+    path = _write_urdf(tmp_path, body, version="1.1")
+    opt = EndEffectorPoseOptimizer(debug_mode=False)
+    opt.load_end_effector_from_urdf("DDA", str(path), "ee", "tcp")
+    elements = _get(opt, "dda_collision")
+    assert [e["kind"] for e in elements] == ["capsule"]
+    assert elements[0]["radius"] == pytest.approx(0.05)
+    assert elements[0]["half_len"] == pytest.approx(0.1)  # length/2 (반구 캡 제외 규약)
+    mesh = _get(opt, "dda_mesh")
+    assert len(mesh.vertices) > 0
+    # 렌더 메시 z 범위 = origin 0.1 +- (half_len + r) = [-0.05, 0.25]
+    bb = mesh.get_axis_aligned_bounding_box()
+    assert bb.min_bound[2] == pytest.approx(-0.05, abs=1e-6)
+    assert bb.max_bound[2] == pytest.approx(0.25, abs=1e-6)
+
+
 def test_empty_scan_no_collision():
     """스캔 점군이 비어있으면 충돌 없음."""
     opt = _fake_with_scan(np.zeros((0, 3)))
