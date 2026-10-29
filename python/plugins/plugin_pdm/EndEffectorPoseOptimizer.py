@@ -289,7 +289,8 @@ class EndEffectorPoseOptimizer:
             mesh = mesh.transform(T)  # type: ignore  # origin 적용 → link_end 프레임
             return {"kind": "mesh", "mesh": mesh}
 
-        raise ValueError(f"지원하지 않는 collision geometry 타입입니다: {geom_type}")
+        detail = f"<{collision.get('tag')}>" if geom_type == "unknown" else geom_type
+        raise ValueError(f"지원하지 않는 collision geometry 타입입니다: {detail}")
 
     @staticmethod
     def __load_mesh_geometry(geometry: dict) -> o3d.geometry.TriangleMesh:

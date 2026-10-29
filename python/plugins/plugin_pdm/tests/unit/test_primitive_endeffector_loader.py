@@ -363,3 +363,36 @@ def test_empty_scan_no_collision():
     cc = _get(opt, "check_collision")
     box = {"kind": "box", "half": np.array([0.1, 0.1, 0.1]), "T": np.eye(4)}
     assert cc([box], _IDENTITY_POSE, np.eye(4)) is False
+
+
+# ============================================================================
+# 잘못된 형상은 조용히 버리지 않는다 (자체 파서 urdf_model)
+# ============================================================================
+
+
+@pytest.mark.parametrize("bad", ['<cone radius="1"/>', ""])
+def test_unknown_collision_geometry_is_rejected(tmp_path, bad):
+    """모르는 태그·빈 <geometry> 의 collision 을 빼고 적재하면 그 부분의 충돌이 오류 없이 사라진다 — 거부해야 한다."""
+    body = f"""
+<link name="base"/>
+<link name="ee">
+  <collision><geometry><box size="0.1 0.1 0.1"/></geometry></collision>
+  <collision><geometry>{bad}</geometry></collision>
+</link>
+<link name="tcp"/>
+<joint name="j_ee" type="fixed"><parent link="base"/><child link="ee"/></joint>
+<joint name="j_tcp" type="fixed"><parent link="base"/><child link="tcp"/></joint>
+"""
+    path = _write_urdf(tmp_path, body)
+    with pytest.raises(ValueError, match="지원하지 않는 collision geometry"):
+        EndEffectorPoseOptimizer().load_end_effector_from_urdf("DDA", str(path), "ee", "tcp")
+
+
+@pytest.mark.parametrize("shape", ['<cylinder length="1"/>', '<box size="1 1"/>', "<sphere/>", '<capsule radius="0.1"/>'])
+def test_missing_geometry_attribute_names_link(tmp_path, shape):
+    """필수 속성이 빠지면 0 으로 채우지 않고 링크·태그를 밝힌 오류를 낸다."""
+    body = (f'<link name="base"/><link name="ee"><collision><geometry>{shape}</geometry></collision></link>'
+            '<joint name="j" type="fixed"><parent link="base"/><child link="ee"/></joint>')
+    path = _write_urdf(tmp_path, body)
+    with pytest.raises(ValueError, match="링크 ee"):
+        EndEffectorPoseOptimizer().load_end_effector_from_urdf("DDA", str(path), "ee", "base")
