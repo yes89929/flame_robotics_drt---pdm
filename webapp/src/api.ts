@@ -155,6 +155,15 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     }).then(json<Session>),
+  /** 저장된 PDM 결과 (검사점 번호 0부터 → 결과) */
+  pdmResults: (cloudPath: string) =>
+    fetch(`/api/pdm/results?${q({ cloud_path: cloudPath })}`).then(json<{ results: Record<string, PdmResult> }>),
+  savePdmResults: (cloudPath: string, results: Record<number, PdmResult>) =>
+    fetch('/api/pdm/results', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cloud_path: cloudPath, results }),
+    }).then(json<{ count: number }>),
   pdmDefaults: () => fetch('/api/pdm/defaults').then(json<PdmParams>),
   pdmRun: (body: unknown) =>
     fetch('/api/pdm/run', {

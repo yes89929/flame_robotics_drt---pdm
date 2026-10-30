@@ -168,3 +168,14 @@ def test_session_store_merges_and_persists(tmp_path, monkeypatch):
     assert s["lastUrdf"] == "X.urdf" and set(s["designations"]) == {"X.urdf", "Y.urdf"} and "bogus" not in s
     assert client.get("/api/session").json() == s
     assert (tmp_path / "session.json").is_file()
+
+
+def test_pdm_results_saved_per_cloud(tmp_path, monkeypatch):
+    """PDM 결과는 점군 파일별로 저장돼 다시 열면 돌아온다."""
+    monkeypatch.setenv("PDM_WEB_LOCAL_DIR", str(tmp_path))
+    a, b = str(tmp_path / "a.ply"), str(tmp_path / "b.ply")
+    assert client.get("/api/pdm/results", params={"cloud_path": a}).json() == {"results": {}}
+    client.put("/api/pdm/results", json={"cloud_path": a, "results": {"0": {"status": "ok", "mode": "3pair"}}})
+    client.put("/api/pdm/results", json={"cloud_path": b, "results": {"1": {"status": "empty"}}})
+    assert client.get("/api/pdm/results", params={"cloud_path": a}).json()["results"] == {"0": {"status": "ok", "mode": "3pair"}}
+    assert client.get("/api/pdm/results", params={"cloud_path": b}).json()["results"] == {"1": {"status": "empty"}}

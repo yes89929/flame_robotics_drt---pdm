@@ -1,4 +1,4 @@
-"""웹 도구 작업 상태 저장소 (`webapp/.local/`, git 무시).
+"""웹 도구 작업 상태·PDM 결과 저장소 (`webapp/.local/`, git 무시).
 
 브라우저 localStorage 는 브라우저·주소(127.0.0.1 / Tailscale)마다 따로라, 다른 창으로 열면 URDF·점군이
 비어 보였다. 그래서 작업 상태(마지막 URDF·열어 둔 점군·작업 대상·PDM 링크 지정·파라미터·탭)를
@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -74,3 +75,22 @@ def update_session(patch: dict[str, Any]) -> dict[str, Any]:
                 cur[key] = value
         _write(local_dir() / "session.json", cur)
         return cur
+
+
+# ── PDM 결과 ─────────────────────────────────────────────────────────────────
+# 점군 파일마다 한 파일: {"cloud_path", "results": {"<검사점 번호(0부터)>": PDM 결과}}.
+# 화면이 검사점을 지우거나 옮기면 번호를 다시 매긴 묶음 전체를 다시 저장한다.
+
+
+def _results_file(cloud_path: str) -> Path:
+    key = str(paths.resolve_path(cloud_path).resolve()).lower()
+    return local_dir() / "pdm_results" / f"{hashlib.sha1(key.encode('utf-8')).hexdigest()[:16]}.json"
+
+
+def get_results(cloud_path: str) -> dict[str, Any]:
+    return _read(_results_file(cloud_path), {}).get("results", {})
+
+
+def save_results(cloud_path: str, results: dict[str, Any]) -> None:
+    with _lock:
+        _write(_results_file(cloud_path), {"cloud_path": str(paths.resolve_path(cloud_path)), "results": results})

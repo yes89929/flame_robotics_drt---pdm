@@ -40,6 +40,14 @@ function persist(patch: Partial<Session>) {
 }
 const cloudList = (layers: Layer[]) => layers.map((l) => ({ path: l.meta.path, scale: l.meta.scale }))
 
+/** 점군 하나의 PDM 결과 묶음을 서버에 저장 (번호를 다시 매긴 경우도 묶음 전체를 다시 쓴다) */
+function persistResults(cloudId: string) {
+  const st = useStore.getState()
+  const layer = st.layers.find((l) => l.meta.id === cloudId)
+  if (!layer) return
+  void api.savePdmResults(layer.meta.path, st.results[cloudId] ?? {}).catch((e) => console.warn('PDM 결과 저장 실패', e))
+}
+
 /** 이름으로 PDM 링크 지정을 추정 (검사룸 URDF: link_1_DDA·tcp_DDA·link_4_RT·tcp_RT) */
 function guessDesignation(model: UrdfModel): Designation {
   const withGeom = model.links.filter((l) => l.collisions.length > 0).map((l) => l.name)
@@ -174,10 +182,11 @@ export const useStore = create<State>((set, get) => ({
     try {
       const meta = await api.loadCloud(path, scale)
       if (get().layers.some((l) => l.meta.id === meta.id)) return
-      const [positions, colors, pts] = await Promise.all([
+      const [positions, colors, pts, saved] = await Promise.all([
         api.cloudPositions(meta.id),
         meta.has_colors ? api.cloudColors(meta.id) : Promise.resolve(null),
         api.points(meta.path),
+        api.pdmResults(meta.path).catch(() => ({ results: {} as Record<string, PdmResult> })),
       ])
       const layer: Layer = { meta, positions, colors, visible: true, colorMode: colors ? 'rgb' : 'height', pointSize: 2 }
       const layers = [...get().layers, layer]
@@ -186,6 +195,7 @@ export const useStore = create<State>((set, get) => ({
         layers,
         activeCloudId: get().activeCloudId ?? meta.id,
         points: { ...get().points, [meta.id]: { csvPath: pts.csv_path, exists: pts.exists, rows: pts.rows, dirty: false } },
+        results: { ...get().results, [meta.id]: Object.fromEntries(Object.entries(saved.results).map(([k, v]) => [Number(k), v])) },
         fitNonce: get().fitNonce + 1,
       })
     } catch (e) {
@@ -245,6 +255,7 @@ export const useStore = create<State>((set, get) => ({
       results: { ...get().results, [id]: res },
       selectedPoint: null,
     })
+    persistResults(id)
   },
   movePoint: (i, delta) => {
     const id = get().activeCloudId
@@ -262,6 +273,7 @@ export const useStore = create<State>((set, get) => ({
       results: { ...get().results, [id]: old },
       selectedPoint: j,
     })
+    persistResults(id)
   },
   reloadPoints: async () => {
     const layer = get().layers.find((l) => l.meta.id === get().activeCloudId)
@@ -272,6 +284,7 @@ export const useStore = create<State>((set, get) => ({
       results: { ...get().results, [layer.meta.id]: {} },
       selectedPoint: null,
     })
+    persistResults(layer.meta.id)
   },
   savePoints: async (overwrite) => {
     const layer = get().layers.find((l) => l.meta.id === get().activeCloudId)
@@ -317,6 +330,7 @@ export const useStore = create<State>((set, get) => ({
         })
         const byCloud = { ...(get().results[activeCloudId] ?? {}), [i]: result }
         set({ results: { ...get().results, [activeCloudId]: byCloud }, running: { done: k + 1, total: indices.length } })
+        persistResults(activeCloudId)
         // 한 점만 돌리면 그 점으로 카메라를 옮기고, 여러 점이면 첫 결과만 선택해 둔다
         if (indices.length === 1) get().focusPoint(i)
         else if (k === 0) set({ selectedPoint: i })

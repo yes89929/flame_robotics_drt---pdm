@@ -173,6 +173,22 @@ def session_put(patch: dict[str, Any]) -> dict[str, Any]:
     return store.update_session(patch)
 
 
+@app.get("/api/pdm/results")
+def pdm_results_get(cloud_path: str) -> dict[str, Any]:
+    return {"results": store.get_results(cloud_path)}
+
+
+class PdmResultsSave(BaseModel):
+    cloud_path: str
+    results: dict[str, Any]
+
+
+@app.put("/api/pdm/results")
+def pdm_results_put(req: PdmResultsSave) -> dict[str, Any]:
+    store.save_results(req.cloud_path, req.results)
+    return {"count": len(req.results)}
+
+
 @app.get("/api/pdm/defaults")
 def pdm_defaults() -> dict[str, Any]:
     return DEFAULT_PARAMS
