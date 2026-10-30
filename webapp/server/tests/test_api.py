@@ -156,3 +156,15 @@ def test_pdm_run_with_room_urdf_on_pipe3():
     assert 0.01 < res["profile"]["radius"] < 0.5
     if res["status"] == "ok":
         assert res["mode"] in ("3pair", "2pair") and len(res["slots"][0]["DDA"]) == 16
+
+
+def test_session_store_merges_and_persists(tmp_path, monkeypatch):
+    """작업 상태는 서버 파일에 남아 어느 브라우저로 열어도 같다. designations 는 URDF 별로 합친다."""
+    monkeypatch.setenv("PDM_WEB_LOCAL_DIR", str(tmp_path))
+    assert client.get("/api/session").json() == {}
+    d1 = {"ddaEnd": "a", "ddaTcp": "b", "rtEnd": "c", "rtTcp": "d"}
+    client.put("/api/session", json={"lastUrdf": "X.urdf", "designations": {"X.urdf": d1}, "bogus": 1})
+    s = client.put("/api/session", json={"clouds": [{"path": "p.ply", "scale": 1.0}], "designations": {"Y.urdf": d1}}).json()
+    assert s["lastUrdf"] == "X.urdf" and set(s["designations"]) == {"X.urdf", "Y.urdf"} and "bogus" not in s
+    assert client.get("/api/session").json() == s
+    assert (tmp_path / "session.json").is_file()
