@@ -68,6 +68,18 @@ export interface PointsFile { csv_path: string; exists: boolean; rows: PointRow[
 
 export type PdmParams = Record<string, number | boolean>
 
+/** 서버에 저장되는 작업 상태 (`webapp/.local/session.json`) — 어느 브라우저로 열어도 같다 */
+export interface Session {
+  lastUrdf?: string
+  clouds?: { path: string; scale: number }[]
+  /** 작업 대상 점군 경로 */
+  activeCloud?: string
+  /** URDF 경로 → PDM 링크 지정 */
+  designations?: Record<string, { ddaEnd: string; ddaTcp: string; rtEnd: string; rtTcp: string }>
+  params?: PdmParams
+  tab?: 'urdf' | 'cloud' | 'pdm'
+}
+
 export interface PdmSlot {
   label: string
   actual_deg: number
@@ -136,6 +148,22 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cloud_path: cloudPath, rows, overwrite }),
     }).then(json<{ csv_path: string; count: number }>),
+  session: () => fetch('/api/session').then(json<Session>),
+  saveSession: (patch: Partial<Session>) =>
+    fetch('/api/session', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }).then(json<Session>),
+  /** 저장된 PDM 결과 (검사점 번호 0부터 → 결과) */
+  pdmResults: (cloudPath: string) =>
+    fetch(`/api/pdm/results?${q({ cloud_path: cloudPath })}`).then(json<{ results: Record<string, PdmResult> }>),
+  savePdmResults: (cloudPath: string, results: Record<number, PdmResult>) =>
+    fetch('/api/pdm/results', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cloud_path: cloudPath, results }),
+    }).then(json<{ count: number }>),
   pdmDefaults: () => fetch('/api/pdm/defaults').then(json<PdmParams>),
   pdmRun: (body: unknown) =>
     fetch('/api/pdm/run', {

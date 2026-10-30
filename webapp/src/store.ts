@@ -1,7 +1,8 @@
 // 앱 전역 상태 (zustand). 세 탭이 같은 URDF·점군·검사점을 공유한다.
-// 브라우저 localStorage 에 남기는 것: 마지막 URDF 경로, URDF별 PDM 링크 지정, 열어 둔 점군 경로, PDM 파라미터.
+// 작업 상태(마지막 URDF·열어 둔 점군·작업 대상·URDF별 PDM 링크 지정·파라미터·탭)는 서버(`/api/session`)에 남긴다.
+// localStorage 는 브라우저·주소마다 따로라 다른 창에서 비어 보였다 — 이제는 옛 값을 서버로 옮길 때만 읽는다.
 import { create } from 'zustand'
-import { api, type CloudMeta, type PdmParams, type PdmResult, type PointRow, type UrdfModel } from './api'
+import { api, type CloudMeta, type PdmParams, type PdmResult, type PointRow, type Session, type UrdfModel } from './api'
 
 export type Tab = 'urdf' | 'cloud' | 'pdm'
 
@@ -21,18 +22,30 @@ export interface Layer {
 
 export interface PointsState { csvPath: string; exists: boolean; rows: PointRow[]; dirty: boolean }
 
-const LS = {
-  get<T>(key: string, fallback: T): T {
-    try {
-      const v = localStorage.getItem(`pdm-web:${key}`)
-      return v ? (JSON.parse(v) as T) : fallback
-    } catch {
-      return fallback
-    }
-  },
-  set(key: string, value: unknown) {
-    localStorage.setItem(`pdm-web:${key}`, JSON.stringify(value))
-  },
+/** 예전 판이 브라우저에 남긴 값 (서버 이전용으로만 읽는다) */
+function legacy<T>(key: string, fallback: T): T {
+  try {
+    const v = localStorage.getItem(`pdm-web:${key}`)
+    return v ? (JSON.parse(v) as T) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+/** 서버 작업 상태의 사본. 바꿀 때마다 서버에도 보낸다(실패해도 화면은 계속 쓴다). */
+let session: Session = {}
+function persist(patch: Partial<Session>) {
+  session = { ...session, ...patch, designations: { ...session.designations, ...patch.designations } }
+  void api.saveSession(patch).catch((e) => console.warn('작업 상태 저장 실패', e))
+}
+const cloudList = (layers: Layer[]) => layers.map((l) => ({ path: l.meta.path, scale: l.meta.scale }))
+
+/** 점군 하나의 PDM 결과 묶음을 서버에 저장 (번호를 다시 매긴 경우도 묶음 전체를 다시 쓴다) */
+function persistResults(cloudId: string) {
+  const st = useStore.getState()
+  const layer = st.layers.find((l) => l.meta.id === cloudId)
+  if (!layer) return
+  void api.savePdmResults(layer.meta.path, st.results[cloudId] ?? {}).catch((e) => console.warn('PDM 결과 저장 실패', e))
 }
 
 /** 이름으로 PDM 링크 지정을 추정 (검사룸 URDF: link_1_DDA·tcp_DDA·link_4_RT·tcp_RT) */
@@ -106,9 +119,9 @@ interface State {
 }
 
 export const useStore = create<State>((set, get) => ({
-  tab: LS.get<Tab>('tab', 'urdf'),
+  tab: 'urdf',
   setTab: (tab) => {
-    LS.set('tab', tab)
+    persist({ tab })
     // 클릭 지정은 점군·검사점 탭 전용 — 다른 탭에서 클릭이 점을 추가하지 않게 끈다
     set({ tab, pickMode: tab === 'cloud' ? get().pickMode : false })
   },
@@ -129,11 +142,8 @@ export const useStore = create<State>((set, get) => ({
       const model = await api.urdf(path)
       // 서버가 옛 데이터 경로를 지금 자리로 풀어 model.path 로 돌려준다 — 새 경로로 다시 기억하고,
       // 옛 경로에 저장된 링크 지정도 새 경로로 옮긴다
-      const saved =
-        LS.get<Designation | null>(`designation:${model.path}`, null) ??
-        LS.get<Designation | null>(`designation:${path}`, null)
-      if (saved) LS.set(`designation:${model.path}`, saved)
-      LS.set('lastUrdf', model.path)
+      const saved = session.designations?.[model.path] ?? session.designations?.[path] ?? null
+      persist({ lastUrdf: model.path, ...(saved ? { designations: { [model.path]: saved } } : {}) })
       set({
         urdf: model,
         joints: {},
@@ -153,7 +163,7 @@ export const useStore = create<State>((set, get) => ({
   setDesignation: (patch) => {
     const designation = { ...get().designation, ...patch }
     const path = get().urdf?.path
-    if (path) LS.set(`designation:${path}`, designation)
+    if (path) persist({ designations: { [path]: designation } })
     set({ designation })
   },
 
@@ -172,18 +182,20 @@ export const useStore = create<State>((set, get) => ({
     try {
       const meta = await api.loadCloud(path, scale)
       if (get().layers.some((l) => l.meta.id === meta.id)) return
-      const [positions, colors, pts] = await Promise.all([
+      const [positions, colors, pts, saved] = await Promise.all([
         api.cloudPositions(meta.id),
         meta.has_colors ? api.cloudColors(meta.id) : Promise.resolve(null),
         api.points(meta.path),
+        api.pdmResults(meta.path).catch(() => ({ results: {} as Record<string, PdmResult> })),
       ])
       const layer: Layer = { meta, positions, colors, visible: true, colorMode: colors ? 'rgb' : 'height', pointSize: 2 }
       const layers = [...get().layers, layer]
-      LS.set('clouds', layers.map((l) => ({ path: l.meta.path, scale: l.meta.scale })))
+      persist({ clouds: cloudList(layers) })
       set({
         layers,
         activeCloudId: get().activeCloudId ?? meta.id,
         points: { ...get().points, [meta.id]: { csvPath: pts.csv_path, exists: pts.exists, rows: pts.rows, dirty: false } },
+        results: { ...get().results, [meta.id]: Object.fromEntries(Object.entries(saved.results).map(([k, v]) => [Number(k), v])) },
         fitNonce: get().fitNonce + 1,
       })
     } catch (e) {
@@ -194,7 +206,7 @@ export const useStore = create<State>((set, get) => ({
   },
   removeCloud: (id) => {
     const layers = get().layers.filter((l) => l.meta.id !== id)
-    LS.set('clouds', layers.map((l) => ({ path: l.meta.path, scale: l.meta.scale })))
+    persist({ clouds: cloudList(layers) })
     void api.unloadCloud(id)
     set({
       layers,
@@ -203,7 +215,10 @@ export const useStore = create<State>((set, get) => ({
     })
   },
   updateLayer: (id, patch) => set({ layers: get().layers.map((l) => (l.meta.id === id ? { ...l, ...patch } : l)) }),
-  setActiveCloud: (activeCloudId) => set({ activeCloudId, selectedPoint: null }),
+  setActiveCloud: (activeCloudId) => {
+    persist({ activeCloud: get().layers.find((l) => l.meta.id === activeCloudId)?.meta.path })
+    set({ activeCloudId, selectedPoint: null })
+  },
   requestFit: () => set({ fitNonce: get().fitNonce + 1 }),
   focusPoint: (i) => set({ selectedPoint: i, focusNonce: i === null ? get().focusNonce : get().focusNonce + 1 }),
   setPickMode: (pickMode) => set({ pickMode }),
@@ -240,6 +255,7 @@ export const useStore = create<State>((set, get) => ({
       results: { ...get().results, [id]: res },
       selectedPoint: null,
     })
+    persistResults(id)
   },
   movePoint: (i, delta) => {
     const id = get().activeCloudId
@@ -257,6 +273,7 @@ export const useStore = create<State>((set, get) => ({
       results: { ...get().results, [id]: old },
       selectedPoint: j,
     })
+    persistResults(id)
   },
   reloadPoints: async () => {
     const layer = get().layers.find((l) => l.meta.id === get().activeCloudId)
@@ -267,6 +284,7 @@ export const useStore = create<State>((set, get) => ({
       results: { ...get().results, [layer.meta.id]: {} },
       selectedPoint: null,
     })
+    persistResults(layer.meta.id)
   },
   savePoints: async (overwrite) => {
     const layer = get().layers.find((l) => l.meta.id === get().activeCloudId)
@@ -282,14 +300,14 @@ export const useStore = create<State>((set, get) => ({
     }
   },
 
-  params: LS.get<PdmParams>('params', {}),
+  params: {},
   results: {},
   running: null,
   stopRequested: false,
   pdmView: { candidates: true, rt2: false, profile: true, tcpAxes: true },
   setParams: (patch) => {
     const params = { ...get().params, ...patch }
-    LS.set('params', params)
+    persist({ params })
     set({ params })
   },
   setPdmView: (patch) => set({ pdmView: { ...get().pdmView, ...patch } }),
@@ -312,6 +330,7 @@ export const useStore = create<State>((set, get) => ({
         })
         const byCloud = { ...(get().results[activeCloudId] ?? {}), [i]: result }
         set({ results: { ...get().results, [activeCloudId]: byCloud }, running: { done: k + 1, total: indices.length } })
+        persistResults(activeCloudId)
         // 한 점만 돌리면 그 점으로 카메라를 옮기고, 여러 점이면 첫 결과만 선택해 둔다
         if (indices.length === 1) get().focusPoint(i)
         else if (k === 0) set({ selectedPoint: i })
@@ -323,12 +342,53 @@ export const useStore = create<State>((set, get) => ({
   stopPdm: () => set({ stopRequested: true }),
 }))
 
-/** 앱 시작 시 마지막 URDF·점군 복원 */
+/** 예전 판이 이 브라우저 localStorage 에 남긴 작업 상태 — 서버에 없는 항목만 서버로 옮긴다 */
+function legacySession(): Session {
+  const designations: NonNullable<Session['designations']> = {}
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i) ?? ''
+    if (k.startsWith('pdm-web:designation:')) designations[k.slice('pdm-web:designation:'.length)] = legacy(k.slice(8), EMPTY_DESIGNATION)
+  }
+  const out: Session = {}
+  const lastUrdf = legacy<string | null>('lastUrdf', null)
+  const clouds = legacy<Session['clouds'] | null>('clouds', null)
+  const params = legacy<PdmParams | null>('params', null)
+  const tab = legacy<Tab | null>('tab', null)
+  if (lastUrdf) out.lastUrdf = lastUrdf
+  if (clouds?.length) out.clouds = clouds
+  if (params && Object.keys(params).length) out.params = params
+  if (tab) out.tab = tab
+  if (Object.keys(designations).length) out.designations = designations
+  return out
+}
+
+/** 앱 시작 시 서버의 작업 상태로 마지막 URDF·점군·작업 대상·파라미터·탭을 복원 */
 export async function restoreSession() {
+  try {
+    session = await api.session()
+  } catch (e) {
+    console.warn('작업 상태를 읽지 못했습니다', e)
+  }
+  const old = legacySession()
+  const missing: Partial<Session> = {}
+  for (const key of Object.keys(old) as (keyof Session)[]) {
+    if (key === 'designations') {
+      const add = Object.fromEntries(Object.entries(old.designations ?? {}).filter(([k]) => !session.designations?.[k]))
+      if (Object.keys(add).length) missing.designations = add
+    } else if (session[key] === undefined) {
+      ;(missing as Record<string, unknown>)[key] = old[key]
+    }
+  }
+  if (Object.keys(missing).length) persist(missing)
+
   const s = useStore.getState()
-  const urdf = LS.get<string | null>('lastUrdf', null)
-  if (urdf) void s.openUrdf(urdf)
-  for (const c of LS.get<{ path: string; scale: number }[]>('clouds', [])) await s.addCloud(c.path, c.scale)
+  if (session.tab) useStore.setState({ tab: session.tab })
+  if (session.params) useStore.setState({ params: session.params })
+  if (session.lastUrdf) void s.openUrdf(session.lastUrdf)
+  const wantActive = session.activeCloud
+  for (const c of session.clouds ?? []) await s.addCloud(c.path, c.scale)
+  const active = useStore.getState().layers.find((l) => l.meta.path === wantActive)
+  if (active) useStore.setState({ activeCloudId: active.meta.id })
 }
 
 export function activeLayer(s: State): Layer | undefined {

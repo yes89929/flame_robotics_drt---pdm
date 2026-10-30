@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
-from . import paths
+from . import paths, store
 from .clouds import CloudStore
 from .pdm_runner import DEFAULT_PARAMS, PdmRunner
 from .testpoints import csv_path_for, read_points, write_points
@@ -158,6 +158,35 @@ def points_put(req: PointsSave) -> dict[str, Any]:
 
 
 # ── PDM ─────────────────────────────────────────────────────────────────────
+
+
+# ── 작업 상태 (브라우저와 무관하게 같은 화면으로 열리도록) ─────────────────────
+
+
+@app.get("/api/session")
+def session_get() -> dict[str, Any]:
+    return store.get_session()
+
+
+@app.put("/api/session")
+def session_put(patch: dict[str, Any]) -> dict[str, Any]:
+    return store.update_session(patch)
+
+
+@app.get("/api/pdm/results")
+def pdm_results_get(cloud_path: str) -> dict[str, Any]:
+    return {"results": store.get_results(cloud_path)}
+
+
+class PdmResultsSave(BaseModel):
+    cloud_path: str
+    results: dict[str, Any]
+
+
+@app.put("/api/pdm/results")
+def pdm_results_put(req: PdmResultsSave) -> dict[str, Any]:
+    store.save_results(req.cloud_path, req.results)
+    return {"count": len(req.results)}
 
 
 @app.get("/api/pdm/defaults")
